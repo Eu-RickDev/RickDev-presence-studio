@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RickDev Presence Studio</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <header class="app-header">
+      <div class="brand-mark"><img src="../../build/icon.png" alt=""></div>
+      <div>
+        <strong>RickDev Presence Studio</strong>
+        <span>Discord Rich Presence</span>
+      </div>
+      <div class="connection-pill" id="statusPill">
+        <i></i>
+        <span id="statusText">Desconectado</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="editor-panel">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">CONFIGURACAO</span>
+            <h1>Construa sua presence.</h1>
+          </div>
+          <button class="ghost-button" id="resetButton" type="button">Limpar</button>
+        </div>
+
+        <section class="profiles-panel">
+          <div class="profiles-heading">
+            <div>
+              <span class="eyebrow">PERFIS</span>
+              <p>Alterne entre configuracoes salvas.</p>
+            </div>
+            <label class="profile-name-field">
+              <span>Nome do perfil</span>
+              <input id="profileName" maxlength="24" placeholder="Nome do perfil">
+            </label>
+          </div>
+          <div class="profile-tabs" id="profileTabs">
+            <button type="button" data-profile="0">Perfil 1</button>
+            <button type="button" data-profile="1">Perfil 2</button>
+            <button type="button" data-profile="2">Perfil 3</button>
+            <button type="button" data-profile="3">Perfil 4</button>
+            <button type="button" data-profile="4">Perfil 5</button>
+          </div>
+        </section>
+
+        <form id="presenceForm">
+          <fieldset>
+            <legend>Aplicativo Discord</legend>
+            <label class="full">
+              <span>Application ID <b>*</b></span>
+              <input id="clientId" name="clientId" inputmode="numeric" maxlength="20" placeholder="Ex: 123456789012345678">
+              <small>Crie um app no Discord Developer Portal e cole o ID aqui.</small>
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Textos</legend>
+            <label>
+              <span>Detalhes</span>
+              <input id="details" name="details" maxlength="128" placeholder="O que voce esta fazendo?">
+            </label>
+            <label>
+              <span>Estado</span>
+              <input id="state" name="state" maxlength="128" placeholder="Uma descricao complementar">
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Imagens</legend>
+            <label>
+              <span>Chave da imagem grande</span>
+              <input id="largeImageKey" name="largeImageKey" placeholder="Ex: logo">
+            </label>
+            <label>
+              <span>Texto da imagem grande</span>
+              <input id="largeImageText" name="largeImageText" maxlength="128" placeholder="Aparece ao passar o mouse">
+            </label>
+            <label>
+              <span>Chave da imagem pequena</span>
+              <input id="smallImageKey" name="smallImageKey" placeholder="Ex: online">
+            </label>
+            <label>
+              <span>Texto da imagem pequena</span>
+              <input id="smallImageText" name="smallImageText" maxlength="128" placeholder="Aparece ao passar o mouse">
+            </label>
+            <p class="field-note">As chaves precisam existir em Rich Presence Assets no Developer Portal.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Botoes</legend>
+            <label>
+              <span>Botao 1</span>
+              <input id="button1Label" name="button1Label" maxlength="32" placeholder="Ex: Ver portfolio">
+            </label>
+            <label>
+              <span>URL do botao 1</span>
+              <input id="button1Url" name="button1Url" type="url" placeholder="https://...">
+            </label>
+            <label>
+              <span>Botao 2</span>
+              <input id="button2Label" name="button2Label" maxlength="32" placeholder="Ex: Entrar no Discord">
+            </label>
+            <label>
+              <span>URL do botao 2</span>
+              <input id="button2Url" name="button2Url" type="url" placeholder="https://...">
+            </label>
+            <p class="field-note">Preencha o texto e a URL juntos. No Discord, teste os botoes visualizando seu perfil por outra conta.</p>
+          </fieldset>
+
+          <label class="toggle-row">
+            <div>
+              <strong>Mostrar tempo decorrido</strong>
+              <span>Inicia o cronometro ao ativar a presence.</span>
+            </div>
+            <input id="showTimer" name="showTimer" type="checkbox">
+            <i></i>
+          </label>
+        </form>
+      </section>
+
+      <aside class="preview-column">
+        <div class="sticky">
+          <span class="eyebrow">PRE-VISUALIZACAO</span>
+          <div class="discord-card">
+            <div class="card-topline">
+              <strong>JOGANDO</strong>
+              <span>RICH PRESENCE</span>
+            </div>
+            <div class="activity">
+              <div class="asset-preview">
+                <div class="asset-placeholder" id="largeAsset">R</div>
+                <div class="small-asset" id="smallAsset">●</div>
+              </div>
+              <div class="activity-copy">
+                <strong id="previewApp">Seu aplicativo</strong>
+                <span id="previewDetails">Criando algo incrivel</span>
+                <span id="previewState">No RickDev Presence Studio</span>
+                <span class="timer" id="previewTimer">00:00 decorrido</span>
+              </div>
+            </div>
+            <div class="preview-buttons" id="previewButtons"></div>
+          </div>
+
+          <div class="actions">
+            <button class="primary-button" id="connectButton" type="button">
+              <span>Ativar presence</span>
+              <i>↗</i>
+            </button>
+            <button class="secondary-button" id="disconnectButton" type="button">Desconectar</button>
+          </div>
+
+          <div class="guide-card">
+            <span>PRIMEIROS PASSOS</span>
+            <ol>
+              <li>Crie um aplicativo no Developer Portal.</li>
+              <li>Adicione imagens em Rich Presence Assets.</li>
+              <li>Abra o Discord desktop e ative sua presence.</li>
+            </ol>
+            <a href="#" id="portalLink">Abrir Discord Developer Portal ↗</a>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <div class="toast" id="toast"></div>
+    <script src="renderer.js"></script>
+  </body>
+</html>

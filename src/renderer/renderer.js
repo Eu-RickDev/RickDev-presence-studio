@@ -1,0 +1,239 @@
+const form = document.querySelector("#presenceForm");
+const fields = [...form.querySelectorAll("input")];
+const statusPill = document.querySelector("#statusPill");
+const statusText = document.querySelector("#statusText");
+const connectButton = document.querySelector("#connectButton");
+const disconnectButton = document.querySelector("#disconnectButton");
+const profileName = document.querySelector("#profileName");
+const profileTabs = [...document.querySelectorAll("#profileTabs button")];
+const toast = document.querySelector("#toast");
+let saveTimeout;
+let timerStartedAt = Date.now();
+let connected = false;
+let profileStore;
+let activeProfile = 0;
+let loadingProfile = false;
+
+function getConfig() {
+  return Object.fromEntries(fields.map((field) => [
+    field.name,
+    field.type === "checkbox" ? field.checked : field.value
+  ]));
+}
+
+function setConfig(config) {
+  fields.forEach((field) => {
+    if (!(field.name in config)) return;
+    if (field.type === "checkbox") field.checked = Boolean(config[field.name]);
+    else field.value = config[field.name] ?? "";
+  });
+}
+
+function currentProfile() {
+  return profileStore.profiles[activeProfile];
+}
+
+function updateCurrentProfile() {
+  if (!profileStore || loadingProfile) return;
+  currentProfile().config = getConfig();
+  currentProfile().name = profileName.value.trim() || `Perfil ${activeProfile + 1}`;
+}
+
+function renderProfiles() {
+  if (!profileStore) return;
+  profileTabs.forEach((button, index) => {
+    button.textContent = profileStore.profiles[index].name;
+    button.classList.toggle("active", index === activeProfile);
+    button.title = profileStore.profiles[index].name;
+  });
+}
+
+function saveProfiles() {
+  if (!profileStore) return Promise.resolve();
+  updateCurrentProfile();
+  profileStore.activeProfile = activeProfile;
+  renderProfiles();
+  return window.presenceAPI.saveConfig(profileStore);
+}
+
+function loadProfile(index) {
+  if (!profileStore) return;
+  updateCurrentProfile();
+  activeProfile = index;
+  profileStore.activeProfile = index;
+  loadingProfile = true;
+  profileName.value = currentProfile().name;
+  setConfig(currentProfile().config);
+  loadingProfile = false;
+  renderProfiles();
+  renderPreview();
+  window.presenceAPI.saveConfig(profileStore);
+}
+
+function display(value, fallback) {
+  return value.trim() || fallback;
+}
+
+function normalizeUrl(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function getButtonError(config) {
+  const pairs = [
+    [config.button1Label.trim(), config.button1Url.trim(), "Botao 1"],
+    [config.button2Label.trim(), config.button2Url.trim(), "Botao 2"]
+  ];
+
+  for (const [label, url, name] of pairs) {
+    if ((label && !url) || (!label && url)) return `${name}: preencha o texto e a URL.`;
+    if (url) {
+      try {
+        new URL(normalizeUrl(url));
+      } catch {
+        return `${name}: informe uma URL valida.`;
+      }
+    }
+  }
+
+  return "";
+}
+
+function renderPreview() {
+  const config = getConfig();
+  document.querySelector("#previewApp").textContent = config.clientId ? `App ${config.clientId.slice(0, 8)}` : "Seu aplicativo";
+  document.querySelector("#previewDetails").textContent = display(config.details, "Sem detalhes");
+  document.querySelector("#previewState").textContent = display(config.state, "Sem estado");
+  document.querySelector("#largeAsset").textContent = config.largeImageKey ? config.largeImageKey.slice(0, 2).toUpperCase() : "R";
+  document.querySelector("#smallAsset").style.display = config.smallImageKey ? "grid" : "none";
+  document.querySelector("#previewTimer").style.display = config.showTimer ? "block" : "none";
+
+  const buttons = [
+    { label: config.button1Label, url: config.button1Url },
+    { label: config.button2Label, url: config.button2Url }
+  ].filter((button) => button.label.trim());
+
+  document.querySelector("#previewButtons").innerHTML = buttons
+    .map((button) => `<button type="button" data-url="${escapeHtml(normalizeUrl(button.url))}" ${button.url.trim() ? "" : "disabled"}>${escapeHtml(button.label)}</button>`)
+    .join("");
+}
+
+function escapeHtml(value) {
+  const element = document.createElement("span");
+  element.textContent = value;
+  return element.innerHTML;
+}
+
+function setStatus(status, message) {
+  connected = status === "online";
+  statusPill.className = `connection-pill ${status}`;
+  statusText.textContent = message;
+  connectButton.querySelector("span").textContent = connected ? "Atualizar presence" : "Ativar presence";
+}
+
+function showToast(message) {
+  toast.textContent = message;
+  toast.classList.add("visible");
+  clearTimeout(showToast.timeout);
+  showToast.timeout = setTimeout(() => toast.classList.remove("visible"), 2800);
+}
+
+async function submitPresence() {
+  const config = getConfig();
+  if (!config.clientId.trim()) {
+    document.querySelector("#clientId").focus();
+    showToast("Informe o Application ID para conectar.");
+    return;
+  }
+
+  const buttonError = getButtonError(config);
+  if (buttonError) {
+    showToast(buttonError);
+    return;
+  }
+
+  const wasConnected = connected;
+  connectButton.disabled = true;
+  await saveProfiles();
+  const result = await window.presenceAPI.connect(config);
+  connectButton.disabled = false;
+  if (!result.ok) showToast(result.error || "Nao foi possivel ativar a presence.");
+  else {
+    timerStartedAt = Date.now();
+    showToast(wasConnected ? "Presence atualizada." : "Presence ativada.");
+  }
+}
+
+form.addEventListener("input", () => {
+  renderPreview();
+  updateCurrentProfile();
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(saveProfiles, 350);
+});
+
+profileName.addEventListener("input", () => {
+  updateCurrentProfile();
+  renderProfiles();
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(saveProfiles, 350);
+});
+
+profileTabs.forEach((button) => {
+  button.addEventListener("click", () => {
+    const nextProfile = Number(button.dataset.profile);
+    if (nextProfile === activeProfile) return;
+    loadProfile(nextProfile);
+    showToast(`${currentProfile().name} carregado.`);
+  });
+});
+
+connectButton.addEventListener("click", submitPresence);
+
+document.querySelector("#previewButtons").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-url]");
+  if (!button?.dataset.url) return;
+  window.presenceAPI.openLink(button.dataset.url);
+});
+
+disconnectButton.addEventListener("click", async () => {
+  await window.presenceAPI.disconnect();
+  showToast("Presence desconectada.");
+});
+
+document.querySelector("#resetButton").addEventListener("click", () => {
+  fields.forEach((field) => {
+    if (field.type === "checkbox") field.checked = true;
+    else if (field.name !== "clientId") field.value = "";
+  });
+  renderPreview();
+  saveProfiles();
+  showToast("Campos limpos.");
+});
+
+document.querySelector("#portalLink").addEventListener("click", (event) => {
+  event.preventDefault();
+  window.presenceAPI.openLink("https://discord.com/developers/applications");
+});
+
+window.presenceAPI.onStatus(({ status, message }) => setStatus(status, message));
+
+setInterval(() => {
+  const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+  const hours = Math.floor(elapsed / 3600);
+  const minutes = Math.floor((elapsed % 3600) / 60);
+  const seconds = elapsed % 60;
+  document.querySelector("#previewTimer").textContent =
+    `${hours ? `${String(hours).padStart(2, "0")}:` : ""}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")} decorrido`;
+}, 1000);
+
+window.presenceAPI.loadConfig().then((store) => {
+  profileStore = store;
+  activeProfile = store.activeProfile;
+  loadingProfile = true;
+  profileName.value = currentProfile().name;
+  setConfig(currentProfile().config);
+  loadingProfile = false;
+  renderProfiles();
+  renderPreview();
+});
