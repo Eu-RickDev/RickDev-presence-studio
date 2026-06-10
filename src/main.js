@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Menu, Tray } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Menu, Tray, net } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const DiscordRPC = require("discord-rpc");
@@ -9,6 +9,7 @@ let rpc;
 let activeClientId;
 let isQuitting = false;
 let trayNoticeShown = false;
+const applicationCache = new Map();
 
 const defaults = {
   clientId: "",
@@ -69,6 +70,61 @@ function loadConfig() {
 
 function saveConfig(profiles) {
   fs.writeFileSync(configPath(), JSON.stringify(normalizeProfiles(profiles), null, 2), "utf8");
+}
+
+function applicationIconUrl(clientId, icon) {
+  if (!icon) return "";
+  const extension = icon.startsWith("a_") ? "gif" : "png";
+  return `https://cdn.discordapp.com/app-icons/${clientId}/${icon}.${extension}?size=256`;
+}
+
+function applicationAssetUrl(clientId, assetId) {
+  return `https://cdn.discordapp.com/app-assets/${clientId}/${assetId}.png`;
+}
+
+async function fetchDiscordJson(url) {
+  const response = await net.fetch(url, {
+    headers: { "User-Agent": "RickDev Presence Studio" }
+  });
+
+  if (!response.ok) {
+    throw new Error(response.status === 404
+      ? "Aplicativo nao encontrado no Discord."
+      : "Nao foi possivel consultar o aplicativo no Discord.");
+  }
+
+  return response.json();
+}
+
+async function lookupApplication(value) {
+  const clientId = String(value || "").trim();
+  if (!/^\d{17,20}$/.test(clientId)) {
+    throw new Error("Informe um Application ID valido do Discord.");
+  }
+
+  const cached = applicationCache.get(clientId);
+  if (cached && Date.now() - cached.createdAt < 5 * 60 * 1000) {
+    return cached.data;
+  }
+
+  const [application, assets] = await Promise.all([
+    fetchDiscordJson(`https://discord.com/api/v10/oauth2/applications/${clientId}/rpc`),
+    fetchDiscordJson(`https://discord.com/api/v10/oauth2/applications/${clientId}/assets`)
+      .catch(() => [])
+  ]);
+
+  const data = {
+    id: clientId,
+    name: application.name || `App ${clientId.slice(0, 8)}`,
+    iconUrl: applicationIconUrl(clientId, application.icon),
+    assets: Object.fromEntries(assets.map((asset) => [
+      asset.name,
+      applicationAssetUrl(clientId, asset.id)
+    ]))
+  };
+
+  applicationCache.set(clientId, { createdAt: Date.now(), data });
+  return data;
 }
 
 function sendStatus(status, message) {
@@ -255,6 +311,7 @@ app.whenReady().then(() => {
   ipcMain.handle("config:save", (_event, config) => {
     saveConfig(config);
   });
+  ipcMain.handle("application:lookup", (_event, clientId) => lookupApplication(clientId));
   ipcMain.handle("presence:connect", async (_event, config) => {
     try {
       await connect(config);

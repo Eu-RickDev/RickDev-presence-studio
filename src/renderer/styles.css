@@ -306,6 +306,8 @@ small, .field-note { margin: 0; color: #646672; font-size: 10px; line-height: 1.
 .asset-preview { position: relative; width: 86px; height: 86px; }
 
 .asset-placeholder {
+  position: relative;
+  overflow: hidden;
   width: 86px;
   height: 86px;
   display: grid;
@@ -316,6 +318,21 @@ small, .field-note { margin: 0; color: #646672; font-size: 10px; line-height: 1.
   font-size: 31px;
   font-weight: 900;
 }
+
+.asset-placeholder img,
+.small-asset img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: none;
+  object-fit: cover;
+}
+
+.asset-placeholder.has-image img,
+.small-asset.has-image img { display: block; }
+.asset-placeholder.has-image span,
+.small-asset.has-image span { display: none; }
 
 .small-asset {
   position: absolute;
@@ -330,6 +347,7 @@ small, .field-note { margin: 0; color: #646672; font-size: 10px; line-height: 1.
   color: white;
   border-radius: 50%;
   font-size: 9px;
+  overflow: hidden;
 }
 
 .activity-copy { min-width: 0; display: grid; gap: 4px; font-size: 11px; }

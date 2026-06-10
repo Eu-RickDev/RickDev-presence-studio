@@ -13,6 +13,9 @@ let connected = false;
 let profileStore;
 let activeProfile = 0;
 let loadingProfile = false;
+let applicationPreview;
+let applicationLookupTimeout;
+let applicationLookupRequest = 0;
 
 function getConfig() {
   return Object.fromEntries(fields.map((field) => [
@@ -67,11 +70,55 @@ function loadProfile(index) {
   loadingProfile = false;
   renderProfiles();
   renderPreview();
+  scheduleApplicationLookup(currentProfile().config.clientId, true);
   window.presenceAPI.saveConfig(profileStore);
 }
 
 function display(value, fallback) {
   return value.trim() || fallback;
+}
+
+function setPreviewImage(containerId, imageId, url, alt) {
+  const container = document.querySelector(containerId);
+  const image = document.querySelector(imageId);
+  container.classList.toggle("has-image", Boolean(url));
+  image.src = url || "";
+  image.alt = url ? alt : "";
+}
+
+async function lookupApplication(clientId) {
+  const request = ++applicationLookupRequest;
+  applicationPreview = undefined;
+  renderPreview();
+
+  try {
+    const result = await window.presenceAPI.lookupApplication(clientId);
+    if (request !== applicationLookupRequest) return;
+    applicationPreview = result;
+  } catch {
+    if (request !== applicationLookupRequest) return;
+    applicationPreview = { id: clientId, unavailable: true };
+  }
+
+  renderPreview();
+}
+
+function scheduleApplicationLookup(clientId, immediate = false) {
+  clearTimeout(applicationLookupTimeout);
+  const normalizedId = clientId.trim();
+
+  if (!/^\d{17,20}$/.test(normalizedId)) {
+    applicationLookupRequest += 1;
+    applicationPreview = undefined;
+    renderPreview();
+    return;
+  }
+
+  if (applicationPreview?.id === normalizedId) return;
+  applicationLookupTimeout = setTimeout(
+    () => lookupApplication(normalizedId),
+    immediate ? 0 : 500
+  );
 }
 
 function normalizeUrl(value) {
@@ -102,11 +149,23 @@ function getButtonError(config) {
 
 function renderPreview() {
   const config = getConfig();
-  document.querySelector("#previewApp").textContent = config.clientId ? `App ${config.clientId.slice(0, 8)}` : "Seu aplicativo";
+  const matchingApplication = applicationPreview?.id === config.clientId.trim()
+    ? applicationPreview
+    : undefined;
+  const largeImageUrl = matchingApplication?.assets?.[config.largeImageKey.trim()]
+    || (!config.largeImageKey.trim() ? matchingApplication?.iconUrl : "");
+  const smallImageUrl = matchingApplication?.assets?.[config.smallImageKey.trim()] || "";
+
+  document.querySelector("#previewApp").textContent = matchingApplication?.name
+    || (config.clientId ? `App ${config.clientId.slice(0, 8)}` : "Seu aplicativo");
   document.querySelector("#previewDetails").textContent = display(config.details, "Sem detalhes");
   document.querySelector("#previewState").textContent = display(config.state, "Sem estado");
-  document.querySelector("#largeAsset").textContent = config.largeImageKey ? config.largeImageKey.slice(0, 2).toUpperCase() : "R";
+  document.querySelector("#largeAssetFallback").textContent = config.largeImageKey
+    ? config.largeImageKey.slice(0, 2).toUpperCase()
+    : matchingApplication?.name?.slice(0, 1).toUpperCase() || "R";
+  setPreviewImage("#largeAsset", "#largeAssetImage", largeImageUrl, "Imagem grande da presence");
   document.querySelector("#smallAsset").style.display = config.smallImageKey ? "grid" : "none";
+  setPreviewImage("#smallAsset", "#smallAssetImage", smallImageUrl, "Imagem pequena da presence");
   document.querySelector("#previewTimer").style.display = config.showTimer ? "block" : "none";
 
   const buttons = [
@@ -165,8 +224,9 @@ async function submitPresence() {
   }
 }
 
-form.addEventListener("input", () => {
+form.addEventListener("input", (event) => {
   renderPreview();
+  if (event.target.name === "clientId") scheduleApplicationLookup(event.target.value);
   updateCurrentProfile();
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(saveProfiles, 350);
@@ -236,4 +296,5 @@ window.presenceAPI.loadConfig().then((store) => {
   loadingProfile = false;
   renderProfiles();
   renderPreview();
+  scheduleApplicationLookup(currentProfile().config.clientId, true);
 });
