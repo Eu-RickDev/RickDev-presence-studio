@@ -1,6 +1,6 @@
 {
   "name": "rickdev-presence",
-  "version": "1.0.3",
+  "version": "1.0.3-alpha.1",
   "description": "Editor personalizavel de Discord Rich Presence",
   "main": "src/main.js",
   "scripts": {

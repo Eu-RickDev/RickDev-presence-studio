@@ -6,7 +6,7 @@
   **Crie, visualize e controle sua Discord Rich Presence em uma interface simples e personalizável.**
 
   <p>
-    <img src="https://img.shields.io/badge/versão-1.0.3-5865F2?style=for-the-badge" alt="Versão 1.0.3">
+    <img src="https://img.shields.io/badge/versão-1.0.3a-5865F2?style=for-the-badge" alt="Versão 1.0.3a">
     <img src="https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows" alt="Plataforma Windows">
     <img src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron 36">
   </p>
@@ -97,7 +97,7 @@ O aplicativo possui cinco perfis independentes. Cada perfil guarda seu próprio 
 No Windows, execute o arquivo disponível na pasta `dist`:
 
 ```text
-dist/RickDev Presence Studio 1.0.3.exe
+dist/RickDev Presence Studio 1.0.3a.exe
 ```
 
 Ao fechar a janela, o aplicativo continua ativo na bandeja do sistema para manter a presence conectada. Para encerrá-lo completamente, clique com o botão direito no ícone da bandeja e selecione **Encerrar**.
