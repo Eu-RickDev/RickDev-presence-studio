@@ -6,6 +6,12 @@ const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
 const profileName = document.querySelector("#profileName");
 const profileTabs = [...document.querySelectorAll("#profileTabs button")];
+const startWithWindows = document.querySelector("#startWithWindows");
+const autoStartPresence = document.querySelector("#autoStartPresence");
+const updateModal = document.querySelector("#updateModal");
+const updateTitle = document.querySelector("#updateTitle");
+const updateVersion = document.querySelector("#updateVersion");
+const updateNotes = document.querySelector("#updateNotes");
 const toast = document.querySelector("#toast");
 let saveTimeout;
 let timerStartedAt = Date.now();
@@ -16,6 +22,7 @@ let loadingProfile = false;
 let applicationPreview;
 let applicationLookupTimeout;
 let applicationLookupRequest = 0;
+let updateUrl = "";
 
 function getConfig() {
   return Object.fromEntries(fields.map((field) => [
@@ -57,6 +64,15 @@ function saveProfiles() {
   profileStore.activeProfile = activeProfile;
   renderProfiles();
   return window.presenceAPI.saveConfig(profileStore);
+}
+
+async function saveGlobalSettings() {
+  if (!profileStore) return;
+  profileStore.settings = {
+    startWithWindows: startWithWindows.checked,
+    autoStartPresence: autoStartPresence.checked
+  };
+  await saveProfiles();
 }
 
 function loadProfile(index) {
@@ -184,8 +200,9 @@ function escapeHtml(value) {
   return element.innerHTML;
 }
 
-function setStatus(status, message) {
+function setStatus(status, message, startedAt) {
   connected = status === "online";
+  if (connected && Number.isFinite(startedAt)) timerStartedAt = startedAt;
   statusPill.className = `connection-pill ${status}`;
   statusText.textContent = message;
   connectButton.querySelector("span").textContent = connected ? "Atualizar presence" : "Ativar presence";
@@ -196,6 +213,75 @@ function showToast(message) {
   toast.classList.add("visible");
   clearTimeout(showToast.timeout);
   showToast.timeout = setTimeout(() => toast.classList.remove("visible"), 2800);
+}
+
+function cleanReleaseText(value) {
+  return value
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .replace(/\[([^\]]+)]\([^)]+\)/g, "$1");
+}
+
+function renderReleaseNotes(notes) {
+  updateNotes.replaceChildren();
+  const fragment = document.createDocumentFragment();
+  let list;
+
+  for (const rawLine of notes.replace(/\r/g, "").split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      list = undefined;
+      continue;
+    }
+
+    let element;
+    if (line.startsWith("### ")) {
+      element = document.createElement("h4");
+      element.textContent = cleanReleaseText(line.slice(4));
+      list = undefined;
+    } else if (line.startsWith("## ")) {
+      element = document.createElement("h3");
+      element.textContent = cleanReleaseText(line.slice(3));
+      list = undefined;
+    } else if (line.startsWith("# ")) {
+      element = document.createElement("h3");
+      element.textContent = cleanReleaseText(line.slice(2));
+      list = undefined;
+    } else if (line.startsWith("- ")) {
+      if (!list) {
+        list = document.createElement("ul");
+        fragment.append(list);
+      }
+      element = document.createElement("li");
+      element.textContent = cleanReleaseText(line.slice(2));
+    } else {
+      element = document.createElement("p");
+      element.textContent = cleanReleaseText(line);
+      list = undefined;
+    }
+
+    if (element.tagName !== "LI") fragment.append(element);
+    else list.append(element);
+  }
+
+  updateNotes.append(fragment);
+}
+
+function showUpdate(update) {
+  updateUrl = update.url;
+  updateTitle.textContent = update.name;
+  updateVersion.textContent = `${update.currentVersion}  >  ${update.version}`;
+  renderReleaseNotes(update.notes);
+  updateModal.classList.add("visible");
+  updateModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("update-open");
+  document.querySelector("#updateOpenButton").focus();
+}
+
+function closeUpdate() {
+  updateModal.classList.remove("visible");
+  updateModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("update-open");
 }
 
 async function submitPresence() {
@@ -219,7 +305,6 @@ async function submitPresence() {
   connectButton.disabled = false;
   if (!result.ok) showToast(result.error || "Nao foi possivel ativar a presence.");
   else {
-    timerStartedAt = Date.now();
     showToast(wasConnected ? "Presence atualizada." : "Presence ativada.");
   }
 }
@@ -237,6 +322,20 @@ profileName.addEventListener("input", () => {
   renderProfiles();
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(saveProfiles, 350);
+});
+
+startWithWindows.addEventListener("change", async () => {
+  await saveGlobalSettings();
+  showToast(startWithWindows.checked
+    ? "O Studio iniciara minimizado com o Windows."
+    : "Inicializacao com o Windows desativada.");
+});
+
+autoStartPresence.addEventListener("change", async () => {
+  await saveGlobalSettings();
+  showToast(autoStartPresence.checked
+    ? "Autoativacao preparada para a proxima abertura."
+    : "Autoativacao desativada.");
 });
 
 profileTabs.forEach((button) => {
@@ -263,7 +362,7 @@ disconnectButton.addEventListener("click", async () => {
 
 document.querySelector("#resetButton").addEventListener("click", () => {
   fields.forEach((field) => {
-    if (field.type === "checkbox") field.checked = true;
+    if (field.type === "checkbox") field.checked = field.name === "showTimer";
     else if (field.name !== "clientId") field.value = "";
   });
   renderPreview();
@@ -276,7 +375,23 @@ document.querySelector("#portalLink").addEventListener("click", (event) => {
   window.presenceAPI.openLink("https://discord.com/developers/applications");
 });
 
-window.presenceAPI.onStatus(({ status, message }) => setStatus(status, message));
+document.querySelector("#updateCloseButton").addEventListener("click", closeUpdate);
+document.querySelector("#updateLaterButton").addEventListener("click", closeUpdate);
+document.querySelector("#updateOpenButton").addEventListener("click", () => {
+  if (updateUrl) window.presenceAPI.openLink(updateUrl);
+  closeUpdate();
+});
+
+updateModal.addEventListener("click", (event) => {
+  if (event.target === updateModal) closeUpdate();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && updateModal.classList.contains("visible")) closeUpdate();
+});
+
+window.presenceAPI.onStatus(({ status, message, startedAt }) => setStatus(status, message, startedAt));
+window.presenceAPI.onUpdateAvailable(showUpdate);
 
 setInterval(() => {
   const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
@@ -290,6 +405,8 @@ setInterval(() => {
 window.presenceAPI.loadConfig().then((store) => {
   profileStore = store;
   activeProfile = store.activeProfile;
+  startWithWindows.checked = Boolean(store.settings?.startWithWindows);
+  autoStartPresence.checked = Boolean(store.settings?.autoStartPresence);
   loadingProfile = true;
   profileName.value = currentProfile().name;
   setConfig(currentProfile().config);

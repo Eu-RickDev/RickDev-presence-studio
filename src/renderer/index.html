@@ -52,6 +52,33 @@
           </div>
         </section>
 
+        <section class="startup-panel">
+          <div class="startup-heading">
+            <span class="eyebrow">INICIALIZACAO</span>
+            <p>Preferencias gerais do aplicativo.</p>
+          </div>
+
+          <div class="startup-options">
+            <label class="toggle-row">
+              <div>
+                <strong>Iniciar com o Windows</strong>
+                <span>Abre o Studio automaticamente em segundo plano e o mantem disponivel na bandeja.</span>
+              </div>
+              <input id="startWithWindows" type="checkbox">
+              <i></i>
+            </label>
+
+            <label class="toggle-row">
+              <div>
+                <strong>Ativar presence ao iniciar</strong>
+                <span>Ativa o perfil selecionado quando o Studio abrir. Se o Discord ainda nao estiver pronto, aguarda e tenta novamente com intervalos seguros.</span>
+              </div>
+              <input id="autoStartPresence" type="checkbox">
+              <i></i>
+            </label>
+          </div>
+        </section>
+
         <form id="presenceForm">
           <fieldset>
             <legend>Aplicativo Discord</legend>
@@ -124,6 +151,15 @@
             <input id="showTimer" name="showTimer" type="checkbox">
             <i></i>
           </label>
+
+          <label class="toggle-row priority-toggle">
+            <div>
+              <strong>Alta prioridade</strong>
+              <span>Reaplica esta presence a cada 60 segundos caso outro aplicativo a substitua, preservando o tempo decorrido.</span>
+            </div>
+            <input id="highPriority" name="highPriority" type="checkbox">
+            <i></i>
+          </label>
         </form>
       </section>
 
@@ -176,6 +212,23 @@
         </div>
       </aside>
     </main>
+
+    <div class="update-overlay" id="updateModal" aria-hidden="true">
+      <section class="update-modal" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
+        <button class="update-close" id="updateCloseButton" type="button" aria-label="Fechar">&times;</button>
+        <span class="eyebrow">NOVA VERSAO DISPONIVEL</span>
+        <h2 id="updateTitle">Atualizacao do RickDev Presence Studio</h2>
+        <div class="update-version" id="updateVersion"></div>
+        <div class="update-notes" id="updateNotes"></div>
+        <div class="update-actions">
+          <button class="secondary-button" id="updateLaterButton" type="button">Agora nao</button>
+          <button class="primary-button" id="updateOpenButton" type="button">
+            <span>Abrir no GitHub</span>
+            <i>&#8599;</i>
+          </button>
+        </div>
+      </section>
+    </div>
 
     <div class="toast" id="toast"></div>
     <script src="renderer.js"></script>

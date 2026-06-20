@@ -2,14 +2,31 @@ const { app, BrowserWindow, ipcMain, shell, Menu, Tray, net } = require("electro
 const path = require("path");
 const fs = require("fs");
 const DiscordRPC = require("discord-rpc");
+const { compareVersions } = require("./version");
 
 let mainWindow;
 let tray;
 let rpc;
 let activeClientId;
+let activeConfig;
+let activeStartTimestamp;
+let priorityInterval;
+let priorityUpdatePromise;
+let autoStartTimer;
+let autoStartAttempt = 0;
+let autoStartToken = 0;
+let updateCheckStarted = false;
 let isQuitting = false;
 let trayNoticeShown = false;
 const applicationCache = new Map();
+const githubRepository = "Eu-RickDev/RickDev-Discord-rich-presence";
+
+const defaultSettings = {
+  startWithWindows: false,
+  autoStartPresence: false
+};
+
+let runtimeSettings = { ...defaultSettings };
 
 const defaults = {
   clientId: "",
@@ -23,7 +40,8 @@ const defaults = {
   button1Url: "",
   button2Label: "",
   button2Url: "",
-  showTimer: true
+  showTimer: true,
+  highPriority: false
 };
 
 function configPath() {
@@ -38,9 +56,15 @@ function emptyProfile(index) {
 }
 
 function normalizeProfiles(data) {
+  const settings = {
+    startWithWindows: Boolean(data?.settings?.startWithWindows),
+    autoStartPresence: Boolean(data?.settings?.autoStartPresence)
+  };
+
   if (Array.isArray(data?.profiles)) {
     return {
       activeProfile: Math.min(Math.max(Number(data.activeProfile) || 0, 0), 4),
+      settings,
       profiles: Array.from({ length: 5 }, (_item, index) => {
         const profile = data.profiles[index] || emptyProfile(index);
         return {
@@ -53,6 +77,7 @@ function normalizeProfiles(data) {
 
   return {
     activeProfile: 0,
+    settings,
     profiles: [
       { name: "Perfil 1", config: { ...defaults, ...(data || {}) } },
       ...Array.from({ length: 4 }, (_item, index) => emptyProfile(index + 1))
@@ -69,7 +94,25 @@ function loadConfig() {
 }
 
 function saveConfig(profiles) {
-  fs.writeFileSync(configPath(), JSON.stringify(normalizeProfiles(profiles), null, 2), "utf8");
+  const normalized = normalizeProfiles(profiles);
+  fs.writeFileSync(configPath(), JSON.stringify(normalized, null, 2), "utf8");
+  return normalized;
+}
+
+function startupExecutablePath() {
+  return process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+}
+
+function applyLoginItemSetting(enabled) {
+  if (process.platform !== "win32" || !app.isPackaged) return;
+
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    enabled,
+    path: startupExecutablePath(),
+    args: ["--hidden"],
+    name: "RickDev Presence Studio"
+  });
 }
 
 function applicationIconUrl(clientId, icon) {
@@ -127,8 +170,70 @@ async function lookupApplication(value) {
   return data;
 }
 
+async function fetchLatestRelease() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await net.fetch(`https://api.github.com/repos/${githubRepository}/releases/latest`, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "RickDev-Presence-Studio",
+        "X-GitHub-Api-Version": "2022-11-28"
+      }
+    });
+
+    if (!response.ok) return undefined;
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function checkForUpdates() {
+  try {
+    const release = await fetchLatestRelease();
+    if (!release || release.draft || compareVersions(app.getVersion(), release.tag_name) <= 0) return;
+
+    const update = {
+      currentVersion: app.getVersion(),
+      version: String(release.tag_name || "").replace(/^v/i, ""),
+      name: release.name || `RickDev Presence Studio ${release.tag_name}`,
+      notes: String(release.body || "Esta versao nao possui notas de lancamento.").slice(0, 20000),
+      url: /^https:\/\/github\.com\//i.test(release.html_url || "")
+        ? release.html_url
+        : `https://github.com/${githubRepository}/releases/latest`
+    };
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("update:available", update);
+    }
+
+    if (mainWindow?.isVisible() === false && process.platform === "win32") {
+      tray?.displayBalloon({
+        title: `RickDev Presence Studio ${update.version}`,
+        content: "Uma nova versao esta disponivel. Clique para ver as novidades."
+      });
+    }
+  } catch {
+    // Update checks must never block startup or affect Discord RPC.
+  }
+}
+
+function scheduleUpdateCheck() {
+  if (updateCheckStarted) return;
+  updateCheckStarted = true;
+  const timer = setTimeout(checkForUpdates, 1500);
+  timer.unref();
+}
+
 function sendStatus(status, message) {
-  mainWindow?.webContents.send("presence:status", { status, message });
+  mainWindow?.webContents.send("presence:status", {
+    status,
+    message,
+    startedAt: status === "online" ? activeStartTimestamp?.getTime() : undefined
+  });
 }
 
 function normalizeUrl(value) {
@@ -169,7 +274,7 @@ function validateButtons(config) {
   }
 }
 
-function buildActivity(config) {
+function buildActivity(config, startTimestamp) {
   validateButtons(config);
 
   const activity = {
@@ -182,7 +287,7 @@ function buildActivity(config) {
     instance: false
   };
 
-  if (config.showTimer) activity.startTimestamp = new Date();
+  if (config.showTimer && startTimestamp) activity.startTimestamp = startTimestamp;
 
   const buttons = buildButtons(config);
 
@@ -190,7 +295,112 @@ function buildActivity(config) {
   return activity;
 }
 
-async function disconnect() {
+function stopPriorityLoop() {
+  if (priorityInterval) clearInterval(priorityInterval);
+  priorityInterval = undefined;
+}
+
+function clearActivePresence() {
+  stopPriorityLoop();
+  activeConfig = undefined;
+  activeStartTimestamp = undefined;
+}
+
+function stopAutoStartRetries() {
+  if (autoStartTimer) clearTimeout(autoStartTimer);
+  autoStartTimer = undefined;
+  autoStartAttempt = 0;
+  autoStartToken += 1;
+}
+
+function isDiscordUnavailableError(error) {
+  return /RPC_CONNECTION_TIMEOUT|Could not connect|connection closed|ECONNREFUSED|ENOENT/i
+    .test(String(error?.message || error));
+}
+
+async function discardRpcClient() {
+  const client = rpc;
+  rpc = undefined;
+  activeClientId = undefined;
+  clearActivePresence();
+
+  if (!client) return;
+  try {
+    await client.destroy();
+  } catch {
+    // A failed IPC connection may not have a transport to close.
+  }
+}
+
+function scheduleAutoStart(initialDelay = 8000) {
+  stopAutoStartRetries();
+  if (!runtimeSettings.autoStartPresence) return;
+
+  const token = autoStartToken;
+
+  const scheduleAttempt = (delay) => {
+    autoStartTimer = setTimeout(async () => {
+      autoStartTimer = undefined;
+      if (token !== autoStartToken || isQuitting || !runtimeSettings.autoStartPresence) return;
+
+      autoStartAttempt += 1;
+      sendStatus("connecting", `Aguardando o Discord - tentativa ${autoStartAttempt}`);
+
+      try {
+        const store = loadConfig();
+        const config = store.profiles[store.activeProfile].config;
+        await connect(config);
+        if (token === autoStartToken) autoStartAttempt = 0;
+      } catch (error) {
+        await discardRpcClient();
+        if (token !== autoStartToken || isQuitting || !runtimeSettings.autoStartPresence) return;
+
+        if (!isDiscordUnavailableError(error)) {
+          sendStatus("error", `Autoativacao: ${error.message || "configuracao invalida"}`);
+          return;
+        }
+
+        const retryDelay = Math.min(15 * 1000 * (2 ** Math.min(autoStartAttempt - 1, 2)), 60 * 1000);
+        sendStatus("connecting", `Discord indisponivel. Nova tentativa em ${retryDelay / 1000}s`);
+        scheduleAttempt(retryDelay);
+      }
+    }, delay);
+    autoStartTimer.unref();
+  };
+
+  scheduleAttempt(initialDelay);
+}
+
+function startPriorityLoop() {
+  stopPriorityLoop();
+  if (!activeConfig?.highPriority) return;
+
+  priorityInterval = setInterval(async () => {
+    if (!rpc || !activeConfig || priorityUpdatePromise) return;
+
+    try {
+      priorityUpdatePromise = rpc.setActivity(buildActivity(activeConfig, activeStartTimestamp));
+      await priorityUpdatePromise;
+      sendStatus("online", "Presence ativa - alta prioridade");
+    } catch (error) {
+      sendStatus("error", error.message || "Falha ao reaplicar a presence.");
+    } finally {
+      priorityUpdatePromise = undefined;
+    }
+  }, 60 * 1000);
+  priorityInterval.unref();
+}
+
+async function disconnect(cancelAutoStart = true) {
+  if (cancelAutoStart) stopAutoStartRetries();
+  clearActivePresence();
+  if (priorityUpdatePromise) {
+    try {
+      await priorityUpdatePromise;
+    } catch {
+      // The pending refresh already reports its own error.
+    }
+  }
   if (rpc) {
     try {
       await rpc.clearActivity();
@@ -210,7 +420,15 @@ async function connect(config) {
     throw new Error("Informe um Application ID valido do Discord.");
   }
 
-  if (rpc && activeClientId !== clientId) await disconnect();
+  stopPriorityLoop();
+  if (priorityUpdatePromise) {
+    try {
+      await priorityUpdatePromise;
+    } catch {
+      // A manual activation below will replace the failed refresh.
+    }
+  }
+  if (rpc && activeClientId !== clientId) await disconnect(false);
 
   if (!rpc) {
     sendStatus("connecting", "Conectando ao Discord...");
@@ -218,6 +436,7 @@ async function connect(config) {
     activeClientId = clientId;
 
     rpc.on("disconnected", () => {
+      clearActivePresence();
       rpc = undefined;
       activeClientId = undefined;
       sendStatus("offline", "Discord desconectado");
@@ -226,12 +445,16 @@ async function connect(config) {
     await rpc.login({ clientId });
   }
 
-  await rpc.setActivity(buildActivity(config));
-  sendStatus("online", "Presence ativa");
+  activeConfig = { ...config };
+  activeStartTimestamp = config.showTimer ? new Date() : undefined;
+  await rpc.setActivity(buildActivity(activeConfig, activeStartTimestamp));
+  startPriorityLoop();
+  sendStatus("online", config.highPriority ? "Presence ativa - alta prioridade" : "Presence ativa");
 }
 
-function createWindow() {
+function createWindow(show = true) {
   mainWindow = new BrowserWindow({
+    show,
     width: 1180,
     height: 820,
     minWidth: 980,
@@ -252,6 +475,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  mainWindow.webContents.once("did-finish-load", scheduleUpdateCheck);
 
   mainWindow.on("close", (event) => {
     if (isQuitting) return;
@@ -271,7 +495,7 @@ function createWindow() {
 
 function showWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) {
-    createWindow();
+    createWindow(true);
     return;
   }
 
@@ -294,11 +518,29 @@ function createTray() {
     }
   ]));
   tray.on("double-click", showWindow);
+  tray.on("balloon-click", showWindow);
 }
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
+
+app.on("second-instance", (_event, commandLine) => {
+  if (commandLine.includes("--hidden")) return;
+  if (app.isReady()) showWindow();
+  else app.once("ready", showWindow);
+});
+
 app.whenReady().then(() => {
-  createWindow();
+  if (!hasSingleInstanceLock) return;
+
+  const startupStore = loadConfig();
+  const launchedHidden = process.argv.includes("--hidden");
+  runtimeSettings = { ...startupStore.settings };
+  applyLoginItemSetting(runtimeSettings.startWithWindows);
+
+  createWindow(!launchedHidden);
   createTray();
+  trayNoticeShown = launchedHidden;
 
   ipcMain.handle("config:load", () => loadConfig());
   ipcMain.handle("link:open", (_event, url) => {
@@ -309,16 +551,27 @@ app.whenReady().then(() => {
     return shell.openExternal(parsed.toString());
   });
   ipcMain.handle("config:save", (_event, config) => {
-    saveConfig(config);
+    const previousStartWithWindows = runtimeSettings.startWithWindows;
+    const normalized = saveConfig(config);
+    runtimeSettings = { ...normalized.settings };
+    if (runtimeSettings.startWithWindows !== previousStartWithWindows) {
+      applyLoginItemSetting(runtimeSettings.startWithWindows);
+    }
+
+    if (!runtimeSettings.autoStartPresence) {
+      stopAutoStartRetries();
+    }
+
+    return normalized;
   });
   ipcMain.handle("application:lookup", (_event, clientId) => lookupApplication(clientId));
   ipcMain.handle("presence:connect", async (_event, config) => {
+    stopAutoStartRetries();
     try {
       await connect(config);
       return { ok: true };
     } catch (error) {
-      rpc = undefined;
-      activeClientId = undefined;
+      await discardRpcClient();
       sendStatus("error", error.message || "Nao foi possivel conectar.");
       return { ok: false, error: error.message };
     }
@@ -329,15 +582,22 @@ app.whenReady().then(() => {
       sendStatus("online", "Presence atualizada");
       return { ok: true };
     } catch (error) {
+      await discardRpcClient();
       sendStatus("error", error.message || "Falha ao atualizar.");
       return { ok: false, error: error.message };
     }
   });
   ipcMain.handle("presence:disconnect", disconnect);
+
+  if (runtimeSettings.autoStartPresence) {
+    scheduleAutoStart(launchedHidden ? 12000 : 3000);
+  }
 });
 
 app.on("before-quit", () => {
   isQuitting = true;
+  stopAutoStartRetries();
+  stopPriorityLoop();
   if (rpc) rpc.destroy();
 });
 

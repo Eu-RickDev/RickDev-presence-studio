@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld("presenceAPI", {
   update: (config) => ipcRenderer.invoke("presence:update", config),
   disconnect: () => ipcRenderer.invoke("presence:disconnect"),
   openLink: (url) => ipcRenderer.invoke("link:open", url),
-  onStatus: (callback) => ipcRenderer.on("presence:status", (_event, data) => callback(data))
+  onStatus: (callback) => ipcRenderer.on("presence:status", (_event, data) => callback(data)),
+  onUpdateAvailable: (callback) => ipcRenderer.on("update:available", (_event, data) => callback(data))
 });
