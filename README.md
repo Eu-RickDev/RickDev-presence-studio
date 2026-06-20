@@ -6,7 +6,7 @@
   **Crie, visualize e controle sua Discord Rich Presence em uma interface simples e personalizável.**
 
   <p>
-    <img src="https://img.shields.io/badge/versão-1.0.3a-5865F2?style=for-the-badge" alt="Versão 1.0.3a">
+    <img src="https://img.shields.io/badge/versão-1.0.4-5865F2?style=for-the-badge" alt="Versão 1.0.4">
     <img src="https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows" alt="Plataforma Windows">
     <img src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron 36">
   </p>
@@ -28,6 +28,9 @@ Você pode definir textos, imagens, botões e tempo decorrido, acompanhar o resu
 - imagem grande e imagem pequena com textos ao passar o mouse;
 - até dois botões com links externos;
 - cronômetro opcional de tempo decorrido;
+- modo de alta prioridade com reaplicação automática e preservação do tempo decorrido;
+- inicialização minimizada com o Windows e ativação automática resiliente;
+- aviso de novas versões com notas da release publicadas no GitHub;
 - conexão, atualização e desconexão da presence pela interface;
 - funcionamento em segundo plano pela bandeja do sistema;
 - executável portátil para Windows, sem instalação.
@@ -87,6 +90,7 @@ O aplicativo possui cinco perfis independentes. Cada perfil guarda seu próprio 
 | Botão 1 e Botão 2 | Texto dos botões da activity | Até 32 caracteres |
 | URL dos botões | Endereço aberto ao clicar no botão | URL válida |
 | Mostrar tempo decorrido | Exibe o tempo desde a ativação | Ligado ou desligado |
+| Alta prioridade | Reaplica a presence a cada 60 segundos sem reiniciar o tempo | Ligado ou desligado |
 
 > Para cada botão, preencha o texto e a URL juntos. O Discord pode não mostrar os botões para você na sua própria activity; teste visualizando seu perfil por outra conta.
 
@@ -97,7 +101,7 @@ O aplicativo possui cinco perfis independentes. Cada perfil guarda seu próprio 
 No Windows, execute o arquivo disponível na pasta `dist`:
 
 ```text
-dist/RickDev Presence Studio 1.0.3a.exe
+dist/RickDev Presence Studio.exe
 ```
 
 Ao fechar a janela, o aplicativo continua ativo na bandeja do sistema para manter a presence conectada. Para encerrá-lo completamente, clique com o botão direito no ícone da bandeja e selecione **Encerrar**.

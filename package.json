@@ -1,6 +1,6 @@
 {
   "name": "rickdev-presence",
-  "version": "1.0.3-alpha.1",
+  "version": "1.0.4",
   "description": "Editor personalizavel de Discord Rich Presence",
   "main": "src/main.js",
   "scripts": {
@@ -11,6 +11,7 @@
   "build": {
     "appId": "dev.rick.discordpresence",
     "productName": "RickDev Presence Studio",
+    "artifactName": "RickDev Presence Studio.${ext}",
     "files": [
       "src/**/*",
       "build/icon.png",
