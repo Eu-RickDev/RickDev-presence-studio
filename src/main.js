@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const DiscordRPC = require("discord-rpc");
 const { compareVersions } = require("./version");
+const { createStartupManager } = require("./startup");
 
 let mainWindow;
 let tray;
@@ -18,6 +19,7 @@ let autoStartToken = 0;
 let updateCheckStarted = false;
 let isQuitting = false;
 let trayNoticeShown = false;
+let startupStatus = { ok: true, active: false };
 const applicationCache = new Map();
 const githubRepository = "Eu-RickDev/RickDev-Discord-rich-presence";
 
@@ -27,6 +29,7 @@ const defaultSettings = {
 };
 
 let runtimeSettings = { ...defaultSettings };
+const startupManager = createStartupManager(app);
 
 const defaults = {
   clientId: "",
@@ -97,22 +100,6 @@ function saveConfig(profiles) {
   const normalized = normalizeProfiles(profiles);
   fs.writeFileSync(configPath(), JSON.stringify(normalized, null, 2), "utf8");
   return normalized;
-}
-
-function startupExecutablePath() {
-  return process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
-}
-
-function applyLoginItemSetting(enabled) {
-  if (process.platform !== "win32" || !app.isPackaged) return;
-
-  app.setLoginItemSettings({
-    openAtLogin: enabled,
-    enabled,
-    path: startupExecutablePath(),
-    args: ["--hidden"],
-    name: "RickDev Presence Studio"
-  });
 }
 
 function applicationIconUrl(clientId, icon) {
@@ -530,19 +517,19 @@ app.on("second-instance", (_event, commandLine) => {
   else app.once("ready", showWindow);
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
 
   const startupStore = loadConfig();
   const launchedHidden = process.argv.includes("--hidden");
   runtimeSettings = { ...startupStore.settings };
-  applyLoginItemSetting(runtimeSettings.startWithWindows);
+  startupStatus = await startupManager.configure(runtimeSettings.startWithWindows);
 
   createWindow(!launchedHidden);
   createTray();
   trayNoticeShown = launchedHidden;
 
-  ipcMain.handle("config:load", () => loadConfig());
+  ipcMain.handle("config:load", () => ({ ...loadConfig(), startupStatus }));
   ipcMain.handle("link:open", (_event, url) => {
     const parsed = new URL(url);
     if (!["http:", "https:"].includes(parsed.protocol)) {
@@ -550,19 +537,19 @@ app.whenReady().then(() => {
     }
     return shell.openExternal(parsed.toString());
   });
-  ipcMain.handle("config:save", (_event, config) => {
+  ipcMain.handle("config:save", async (_event, config) => {
     const previousStartWithWindows = runtimeSettings.startWithWindows;
     const normalized = saveConfig(config);
     runtimeSettings = { ...normalized.settings };
     if (runtimeSettings.startWithWindows !== previousStartWithWindows) {
-      applyLoginItemSetting(runtimeSettings.startWithWindows);
+      startupStatus = await startupManager.configure(runtimeSettings.startWithWindows);
     }
 
     if (!runtimeSettings.autoStartPresence) {
       stopAutoStartRetries();
     }
 
-    return normalized;
+    return { ...normalized, startupStatus };
   });
   ipcMain.handle("application:lookup", (_event, clientId) => lookupApplication(clientId));
   ipcMain.handle("presence:connect", async (_event, config) => {

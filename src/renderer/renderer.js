@@ -8,6 +8,7 @@ const profileName = document.querySelector("#profileName");
 const profileTabs = [...document.querySelectorAll("#profileTabs button")];
 const startWithWindows = document.querySelector("#startWithWindows");
 const autoStartPresence = document.querySelector("#autoStartPresence");
+const startupStatus = document.querySelector("#startupStatus");
 const updateModal = document.querySelector("#updateModal");
 const updateTitle = document.querySelector("#updateTitle");
 const updateVersion = document.querySelector("#updateVersion");
@@ -72,7 +73,34 @@ async function saveGlobalSettings() {
     startWithWindows: startWithWindows.checked,
     autoStartPresence: autoStartPresence.checked
   };
-  await saveProfiles();
+  const result = await saveProfiles();
+  if (result?.settings) profileStore.settings = { ...result.settings };
+  renderStartupStatus(result?.startupStatus);
+  return result?.startupStatus;
+}
+
+function renderStartupStatus(status) {
+  startupStatus.className = "startup-status";
+  startupStatus.textContent = "";
+  if (!status) return;
+
+  if (!status.ok) {
+    startupStatus.textContent = status.error;
+    startupStatus.classList.add("visible", "error");
+    return;
+  }
+
+  if (status.development && startWithWindows.checked) {
+    startupStatus.textContent = "A configuracao sera aplicada ao executar a versao compilada.";
+  } else if (status.active && status.managed) {
+    startupStatus.textContent = status.updated
+      ? "Copia de inicializacao criada ou atualizada com sucesso."
+      : "Inicializacao protegida pela copia gerenciada no LocalAppData.";
+  } else if (status.retained) {
+    startupStatus.textContent = "Inicializacao desativada. A copia em uso foi mantida e nao sera aberta pelo Windows.";
+  }
+
+  if (startupStatus.textContent) startupStatus.classList.add("visible");
 }
 
 function loadProfile(index) {
@@ -325,10 +353,16 @@ profileName.addEventListener("input", () => {
 });
 
 startWithWindows.addEventListener("change", async () => {
-  await saveGlobalSettings();
-  showToast(startWithWindows.checked
-    ? "O Studio iniciara minimizado com o Windows."
-    : "Inicializacao com o Windows desativada.");
+  const status = await saveGlobalSettings();
+  if (!status?.ok) {
+    showToast(status?.error || "Nao foi possivel configurar a inicializacao.");
+    return;
+  }
+  showToast(status.development
+    ? "Preferencia salva para a versao compilada."
+    : startWithWindows.checked
+      ? "Inicializacao protegida configurada."
+      : "Inicializacao com o Windows desativada.");
 });
 
 autoStartPresence.addEventListener("change", async () => {
@@ -407,6 +441,7 @@ window.presenceAPI.loadConfig().then((store) => {
   activeProfile = store.activeProfile;
   startWithWindows.checked = Boolean(store.settings?.startWithWindows);
   autoStartPresence.checked = Boolean(store.settings?.autoStartPresence);
+  renderStartupStatus(store.startupStatus);
   loadingProfile = true;
   profileName.value = currentProfile().name;
   setConfig(currentProfile().config);

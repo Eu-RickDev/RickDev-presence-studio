@@ -1,11 +1,12 @@
 {
   "name": "rickdev-presence",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Editor personalizavel de Discord Rich Presence",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "test": "node --test",
     "build": "electron-builder --win portable"
   },
   "build": {

@@ -62,7 +62,7 @@
             <label class="toggle-row">
               <div>
                 <strong>Iniciar com o Windows</strong>
-                <span>Abre o Studio automaticamente em segundo plano e o mantem disponivel na bandeja.</span>
+                <span>Cria uma copia gerenciada no LocalAppData e inicia o Studio minimizado. Mover ou renomear o arquivo original nao interrompe a inicializacao.</span>
               </div>
               <input id="startWithWindows" type="checkbox">
               <i></i>
@@ -77,6 +77,7 @@
               <i></i>
             </label>
           </div>
+          <p class="startup-status" id="startupStatus"></p>
         </section>
 
         <form id="presenceForm">
