@@ -32,6 +32,12 @@
           <button class="ghost-button" id="resetButton" type="button">Limpar</button>
         </div>
 
+        <div class="editor-tabs" id="editorTabs">
+          <button type="button" data-tab="presence" class="active">Presence</button>
+          <button type="button" data-tab="media">Modo de midia</button>
+        </div>
+
+        <div class="tab-content" id="tabPresence">
         <section class="profiles-panel">
           <div class="profiles-heading">
             <div>
@@ -162,6 +168,26 @@
             <i></i>
           </label>
         </form>
+        </div>
+
+        <div class="tab-content" id="tabMedia" hidden>
+          <section class="music-panel">
+            <label class="toggle-row music-toggle">
+              <div>
+                <strong>Modo de midia</strong>
+                <span>Mostra sua midia em reproducao no momento. Enquanto nenhuma midia estiver em execucao, retoma sua presence configurada.</span>
+              </div>
+              <input id="musicMode" name="musicMode" type="checkbox">
+              <i></i>
+            </label>
+
+            <div class="music-panel-heading">
+              <span class="eyebrow">FONTES</span>
+              <p>Escolha quais aplicativos podem alimentar o modo de midia.</p>
+            </div>
+            <div class="music-sources" id="musicSources"></div>
+          </section>
+        </div>
       </section>
 
       <aside class="preview-column">
@@ -169,7 +195,7 @@
           <span class="eyebrow">PRE-VISUALIZACAO</span>
           <div class="discord-card">
             <div class="card-topline">
-              <strong>JOGANDO</strong>
+              <strong id="previewMode">JOGANDO</strong>
               <span>RICH PRESENCE</span>
             </div>
             <div class="activity">
@@ -188,6 +214,14 @@
                 <span id="previewDetails">Criando algo incrivel</span>
                 <span id="previewState">No RickDev Presence Studio</span>
                 <span class="timer" id="previewTimer">00:00 decorrido</span>
+                <div class="music-progress" id="musicProgress">
+                  <div class="music-progress-bar"><i id="musicProgressFill"></i></div>
+                  <div class="music-progress-times">
+                    <span id="musicElapsed">0:00</span>
+                    <span id="musicDuration">0:00</span>
+                  </div>
+                </div>
+                <span class="music-hint" id="musicHint"></span>
               </div>
             </div>
             <div class="preview-buttons" id="previewButtons"></div>

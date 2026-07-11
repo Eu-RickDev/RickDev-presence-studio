@@ -6,7 +6,7 @@
   **Crie, visualize e controle sua Discord Rich Presence em uma interface simples e personalizável.**
 
   <p>
-    <img src="https://img.shields.io/badge/versão-1.0.5-5865F2?style=for-the-badge" alt="Versão 1.0.5">
+    <img src="https://img.shields.io/badge/versão-1.1.0-5865F2?style=for-the-badge" alt="Versão 1.1.0">
     <img src="https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows" alt="Plataforma Windows">
     <img src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron 36">
   </p>
@@ -28,6 +28,7 @@ Você pode definir textos, imagens, botões e tempo decorrido, acompanhar o resu
 - imagem grande e imagem pequena com textos ao passar o mouse;
 - até dois botões com links externos;
 - cronômetro opcional de tempo decorrido;
+- modo de mídia: mostra a mídia em reprodução no Windows como atividade "Ouvindo", com barra de progresso, capa do álbum e bloqueio por fonte;
 - modo de alta prioridade com reaplicação automática e preservação do tempo decorrido;
 - inicialização minimizada com o Windows e ativação automática resiliente;
 - aviso de novas versões com notas da release publicadas no GitHub;
@@ -67,6 +68,25 @@ As imagens podem levar alguns minutos para aparecer após o envio.
 
 Após a conexão, você pode editar os campos e clicar em **Atualizar presence** para publicar as alterações.
 
+## Modo de mídia
+
+A aba **Modo de mídia** concentra tudo do recurso: o interruptor de ativação (por perfil) e as fontes detectadas. Com ele ligado, a presence mostra sua mídia em reprodução no momento; enquanto nenhuma mídia estiver em execução, retoma a presence configurada do perfil. Funciona com Spotify, navegadores e qualquer player que se integre aos controles de mídia do Windows.
+
+- A atividade aparece como **"Ouvindo"**, com título, artista e álbum da faixa;
+- a barra de progresso acompanha a posição real da mídia, inclusive ao avançar ou voltar;
+- a capa do álbum é buscada automaticamente (iTunes); sem resultado, a imagem grande do perfil é usada;
+- os botões e a imagem pequena configurados no perfil continuam visíveis;
+- ao pausar, a presence indica **"Em pausa"** e, após cerca de 30 segundos sem reprodução, volta sozinha para a presence configurada do perfil;
+- a pré-visualização mostra em tempo real a mídia detectada antes mesmo de ativar a presence.
+
+### Fontes
+
+A lista de **Fontes** mostra os aplicativos reproduzindo mídia no Windows. Use **Bloquear** para que uma fonte nunca alimente o modo de mídia — se outra fonte desbloqueada estiver tocando (por exemplo, o Spotify), ela assume; sem nenhuma fonte desbloqueada, a presence configurada do perfil é aplicada. **Desbloquear** reverte a escolha a qualquer momento.
+
+> **Navegadores:** cada navegador aparece como uma única fonte — o Windows não diferencia o que é vídeo ou música dentro dele. Para separar YouTube de YouTube Music, instale o YouTube Music como aplicativo (menu do navegador > *Instalar app*): ele vira uma fonte própria, e você pode bloquear o navegador sem perdê-lo.
+
+> A detecção usa os controles de mídia do próprio Windows (Windows 10 1809 ou mais recente). Alguns players não informam duração; nesses casos a barra de progresso não é exibida.
+
 ## Perfis
 
 O aplicativo possui cinco perfis independentes. Cada perfil guarda seu próprio Application ID, textos, imagens, botões e configuração do cronômetro.
@@ -91,6 +111,7 @@ O aplicativo possui cinco perfis independentes. Cada perfil guarda seu próprio 
 | URL dos botões | Endereço aberto ao clicar no botão | URL válida |
 | Mostrar tempo decorrido | Exibe o tempo desde a ativação | Ligado ou desligado |
 | Alta prioridade | Reaplica a presence a cada 60 segundos sem reiniciar o tempo | Ligado ou desligado |
+| Modo de mídia | Substitui os textos pela mídia em reprodução no Windows | Ligado ou desligado |
 
 > Para cada botão, preencha o texto e a URL juntos. O Discord pode não mostrar os botões para você na sua própria activity; teste visualizando seu perfil por outra conta.
 
