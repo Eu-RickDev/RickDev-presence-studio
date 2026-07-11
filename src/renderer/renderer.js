@@ -1,5 +1,6 @@
 const form = document.querySelector("#presenceForm");
-const fields = [...form.querySelectorAll("input")];
+const mediaTab = document.querySelector("#tabMedia");
+const fields = [...document.querySelectorAll("#presenceForm input, #tabMedia input[name]")];
 const statusPill = document.querySelector("#statusPill");
 const statusText = document.querySelector("#statusText");
 const connectButton = document.querySelector("#connectButton");
@@ -24,6 +25,8 @@ let applicationPreview;
 let applicationLookupTimeout;
 let applicationLookupRequest = 0;
 let updateUrl = "";
+let musicState;
+let musicStateAt = 0;
 
 function getConfig() {
   return Object.fromEntries(fields.map((field) => [
@@ -71,11 +74,13 @@ async function saveGlobalSettings() {
   if (!profileStore) return;
   profileStore.settings = {
     startWithWindows: startWithWindows.checked,
-    autoStartPresence: autoStartPresence.checked
+    autoStartPresence: autoStartPresence.checked,
+    musicIgnoredApps: profileStore.settings?.musicIgnoredApps || []
   };
   const result = await saveProfiles();
   if (result?.settings) profileStore.settings = { ...result.settings };
   renderStartupStatus(result?.startupStatus);
+  renderMusicSources();
   return result?.startupStatus;
 }
 
@@ -115,6 +120,7 @@ function loadProfile(index) {
   renderProfiles();
   renderPreview();
   scheduleApplicationLookup(currentProfile().config.clientId, true);
+  window.presenceAPI.watchMusic(Boolean(currentProfile().config.musicMode));
   window.presenceAPI.saveConfig(profileStore);
 }
 
@@ -126,7 +132,9 @@ function setPreviewImage(containerId, imageId, url, alt) {
   const container = document.querySelector(containerId);
   const image = document.querySelector(imageId);
   container.classList.toggle("has-image", Boolean(url));
-  image.src = url || "";
+  const next = url || "";
+  // Reassigning the same src restarts animated GIFs on every re-render.
+  if ((image.getAttribute("src") ?? "") !== next) image.src = next;
   image.alt = url ? alt : "";
 }
 
@@ -191,41 +199,173 @@ function getButtonError(config) {
   return "";
 }
 
+function currentMusic(config) {
+  if (!config.musicMode || musicState?.presentation?.mode !== "music" || !musicState.media) return undefined;
+  return musicState.media;
+}
+
+function sourceLabel(app) {
+  const base = app.replace(/\.exe$/i, "");
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+function renderMusicSources() {
+  const container = document.querySelector("#musicSources");
+  const ignoredApps = profileStore?.settings?.musicIgnoredApps || [];
+  const detected = musicState?.sources || [];
+
+  const rows = detected.map((source) => ({ ...source, detected: true }));
+  for (const app of ignoredApps) {
+    if (!detected.some((source) => source.app.toLowerCase() === app)) {
+      rows.push({ app, title: "", playing: false, ignored: true, detected: false });
+    }
+  }
+
+  // Skip identical re-renders so a button never disappears mid-click.
+  const signature = JSON.stringify(rows);
+  if (renderMusicSources.signature === signature) return;
+  renderMusicSources.signature = signature;
+
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "music-sources-empty";
+    empty.textContent = musicState?.watching
+      ? "Nenhuma midia detectada agora. De o play em algo para a fonte aparecer aqui."
+      : "Ative o modo de midia para detectar as fontes.";
+    container.replaceChildren(empty);
+    return;
+  }
+
+  container.replaceChildren(...rows.map((row) => {
+    const item = document.createElement("div");
+    item.className = `music-source${row.ignored ? " ignored" : ""}`;
+
+    const info = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = sourceLabel(row.app);
+    const detail = document.createElement("span");
+    detail.textContent = !row.detected
+      ? "Bloqueada (sem midia agora)"
+      : row.ignored
+        ? "Bloqueada"
+        : `${row.playing ? "Tocando" : "Em pausa"}${row.title ? ` - ${row.title}` : ""}`;
+    info.append(name, detail);
+
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "ghost-button";
+    action.textContent = row.ignored ? "Desbloquear" : "Bloquear";
+    action.dataset.app = row.app;
+    action.dataset.ignore = row.ignored ? "0" : "1";
+
+    item.append(info, action);
+    return item;
+  }));
+}
+
+async function toggleIgnoredSource(app, ignore) {
+  if (!profileStore) return;
+  const list = new Set(profileStore.settings?.musicIgnoredApps || []);
+  if (ignore) list.add(app.toLowerCase());
+  else list.delete(app.toLowerCase());
+  profileStore.settings.musicIgnoredApps = [...list];
+  renderMusicSources.signature = undefined;
+  await saveGlobalSettings();
+  showToast(ignore
+    ? `${sourceLabel(app)} bloqueado no modo de midia.`
+    : `${sourceLabel(app)} desbloqueado.`);
+}
+
+function formatTime(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function renderMusicProgress() {
+  const config = getConfig();
+  const music = currentMusic(config);
+  const progress = document.querySelector("#musicProgress");
+
+  if (!music || musicState.presentation.paused || !music.playing || !music.durationMs) {
+    progress.classList.remove("visible");
+    return;
+  }
+
+  const position = Math.min(music.positionMs + (Date.now() - musicStateAt), music.durationMs);
+  document.querySelector("#musicProgressFill").style.width =
+    `${Math.min(100, (position / music.durationMs) * 100).toFixed(2)}%`;
+  document.querySelector("#musicElapsed").textContent = formatTime(position);
+  document.querySelector("#musicDuration").textContent = formatTime(music.durationMs);
+  progress.classList.add("visible");
+}
+
 function renderPreview() {
   const config = getConfig();
   const matchingApplication = applicationPreview?.id === config.clientId.trim()
     ? applicationPreview
     : undefined;
-  const largeImageUrl = matchingApplication?.assets?.[config.largeImageKey.trim()]
+  const music = currentMusic(config);
+  const musicPaused = Boolean(music && musicState.presentation.paused);
+  const largeImageUrl = music?.artUrl
+    || matchingApplication?.assets?.[config.largeImageKey.trim()]
     || (!config.largeImageKey.trim() ? matchingApplication?.iconUrl : "");
   const smallImageUrl = matchingApplication?.assets?.[config.smallImageKey.trim()] || "";
 
+  document.querySelector("#previewMode").textContent = music ? "OUVINDO" : "JOGANDO";
   document.querySelector("#previewApp").textContent = matchingApplication?.name
     || (config.clientId ? `App ${config.clientId.slice(0, 8)}` : "Seu aplicativo");
-  document.querySelector("#previewDetails").textContent = display(config.details, "Sem detalhes");
-  document.querySelector("#previewState").textContent = display(config.state, "Sem estado");
-  document.querySelector("#largeAssetFallback").textContent = config.largeImageKey
-    ? config.largeImageKey.slice(0, 2).toUpperCase()
-    : matchingApplication?.name?.slice(0, 1).toUpperCase() || "R";
+  document.querySelector("#previewDetails").textContent = music
+    ? music.title
+    : display(config.details, "Sem detalhes");
+  document.querySelector("#previewState").textContent = music
+    ? (musicPaused ? (music.artist ? `Em pausa - ${music.artist}` : "Em pausa") : music.artist)
+    : display(config.state, "Sem estado");
+  document.querySelector("#largeAssetFallback").textContent = music
+    ? music.title.slice(0, 1).toUpperCase()
+    : config.largeImageKey
+      ? config.largeImageKey.slice(0, 2).toUpperCase()
+      : matchingApplication?.name?.slice(0, 1).toUpperCase() || "R";
   setPreviewImage("#largeAsset", "#largeAssetImage", largeImageUrl, "Imagem grande da presence");
   document.querySelector("#smallAsset").style.display = config.smallImageKey ? "grid" : "none";
   setPreviewImage("#smallAsset", "#smallAssetImage", smallImageUrl, "Imagem pequena da presence");
-  document.querySelector("#previewTimer").style.display = config.showTimer ? "block" : "none";
+  document.querySelector("#previewTimer").style.display = !music && config.showTimer ? "block" : "none";
 
+  const hint = document.querySelector("#musicHint");
+  if (config.musicMode && musicState?.error) {
+    hint.textContent = musicState.error;
+  } else if (config.musicMode && !music) {
+    hint.textContent = "Sem midia em reproducao - mostrando a presence configurada.";
+  } else {
+    hint.textContent = "";
+  }
+  hint.style.display = hint.textContent ? "block" : "none";
+
+  renderMusicProgress();
+  renderPreviewButtons(config);
+}
+
+function renderPreviewButtons(config) {
   const buttons = [
     { label: config.button1Label, url: config.button1Url },
     { label: config.button2Label, url: config.button2Url }
   ].filter((button) => button.label.trim());
 
-  document.querySelector("#previewButtons").innerHTML = buttons
-    .map((button) => `<button type="button" data-url="${escapeHtml(normalizeUrl(button.url))}" ${button.url.trim() ? "" : "disabled"}>${escapeHtml(button.label)}</button>`)
-    .join("");
-}
+  // Skip identical re-renders: replacing the nodes mid-press would swallow
+  // the click, and music state refreshes re-render the preview repeatedly.
+  const signature = JSON.stringify(buttons);
+  if (renderPreviewButtons.signature === signature) return;
+  renderPreviewButtons.signature = signature;
 
-function escapeHtml(value) {
-  const element = document.createElement("span");
-  element.textContent = value;
-  return element.innerHTML;
+  document.querySelector("#previewButtons").replaceChildren(...buttons.map((button) => {
+    const element = document.createElement("button");
+    element.type = "button";
+    element.textContent = button.label;
+    element.dataset.url = normalizeUrl(button.url);
+    element.disabled = !button.url.trim();
+    return element;
+  }));
 }
 
 function setStatus(status, message, startedAt) {
@@ -337,12 +477,29 @@ async function submitPresence() {
   }
 }
 
-form.addEventListener("input", (event) => {
+function handleConfigInput(event) {
+  if (!(event.target instanceof HTMLInputElement)) return;
   renderPreview();
   if (event.target.name === "clientId") scheduleApplicationLookup(event.target.value);
+  if (event.target.name === "musicMode") {
+    window.presenceAPI.watchMusic(event.target.checked);
+    if (connected) showToast("Clique em Atualizar presence para aplicar a mudanca.");
+  }
   updateCurrentProfile();
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(saveProfiles, 350);
+}
+
+form.addEventListener("input", handleConfigInput);
+mediaTab.addEventListener("input", handleConfigInput);
+
+const editorTabs = [...document.querySelectorAll("#editorTabs button")];
+editorTabs.forEach((button) => {
+  button.addEventListener("click", () => {
+    editorTabs.forEach((tab) => tab.classList.toggle("active", tab === button));
+    document.querySelector("#tabPresence").hidden = button.dataset.tab !== "presence";
+    mediaTab.hidden = button.dataset.tab !== "media";
+  });
 });
 
 profileName.addEventListener("input", () => {
@@ -399,6 +556,7 @@ document.querySelector("#resetButton").addEventListener("click", () => {
     if (field.type === "checkbox") field.checked = field.name === "showTimer";
     else if (field.name !== "clientId") field.value = "";
   });
+  window.presenceAPI.watchMusic(false);
   renderPreview();
   saveProfiles();
   showToast("Campos limpos.");
@@ -425,6 +583,18 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.presenceAPI.onStatus(({ status, message, startedAt }) => setStatus(status, message, startedAt));
+window.presenceAPI.onMusicState((data) => {
+  musicState = data;
+  musicStateAt = Date.now();
+  renderPreview();
+  renderMusicSources();
+});
+
+document.querySelector("#musicSources").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-app]");
+  if (!button) return;
+  toggleIgnoredSource(button.dataset.app, button.dataset.ignore === "1");
+});
 window.presenceAPI.onUpdateAvailable(showUpdate);
 
 setInterval(() => {
@@ -434,6 +604,7 @@ setInterval(() => {
   const seconds = elapsed % 60;
   document.querySelector("#previewTimer").textContent =
     `${hours ? `${String(hours).padStart(2, "0")}:` : ""}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")} decorrido`;
+  renderMusicProgress();
 }, 1000);
 
 window.presenceAPI.loadConfig().then((store) => {
@@ -448,5 +619,7 @@ window.presenceAPI.loadConfig().then((store) => {
   loadingProfile = false;
   renderProfiles();
   renderPreview();
+  renderMusicSources();
   scheduleApplicationLookup(currentProfile().config.clientId, true);
+  window.presenceAPI.watchMusic(Boolean(currentProfile().config.musicMode));
 });
