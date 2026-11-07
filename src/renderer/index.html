@@ -2,6 +2,7 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; base-uri 'none'; form-action 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RickDev Presence Studio</title>
     <link rel="stylesheet" href="styles.css">
@@ -26,7 +27,7 @@
       <section class="editor-panel">
         <div class="section-heading">
           <div>
-            <span class="eyebrow">CONFIGURACAO</span>
+            <span class="eyebrow">CONFIGURAÇÃO</span>
             <h1>Construa sua presence.</h1>
           </div>
           <button class="ghost-button" id="resetButton" type="button">Limpar</button>
@@ -34,7 +35,7 @@
 
         <div class="editor-tabs" id="editorTabs">
           <button type="button" data-tab="presence" class="active">Presence</button>
-          <button type="button" data-tab="media">Modo de midia</button>
+          <button type="button" data-tab="media">Modo de mídia</button>
         </div>
 
         <div class="tab-content" id="tabPresence">
@@ -42,7 +43,7 @@
           <div class="profiles-heading">
             <div>
               <span class="eyebrow">PERFIS</span>
-              <p>Alterne entre configuracoes salvas.</p>
+              <p>Alterne entre configurações salvas.</p>
             </div>
             <label class="profile-name-field">
               <span>Nome do perfil</span>
@@ -56,19 +57,26 @@
             <button type="button" data-profile="3">Perfil 4</button>
             <button type="button" data-profile="4">Perfil 5</button>
           </div>
+          <div class="profile-transfer">
+            <span>Faça backup dos perfis ou leve-os para outro computador.</span>
+            <div>
+              <button class="ghost-button" id="importProfilesButton" type="button">Importar perfis</button>
+              <button class="ghost-button" id="exportProfilesButton" type="button">Exportar perfis</button>
+            </div>
+          </div>
         </section>
 
         <section class="startup-panel">
           <div class="startup-heading">
-            <span class="eyebrow">INICIALIZACAO</span>
-            <p>Preferencias gerais do aplicativo.</p>
+            <span class="eyebrow">PREFERÊNCIAS</span>
+            <p>Inicialização e conexão com o Discord.</p>
           </div>
 
           <div class="startup-options">
             <label class="toggle-row">
               <div>
                 <strong>Iniciar com o Windows</strong>
-                <span>Cria uma copia gerenciada no LocalAppData e inicia o Studio minimizado. Mover ou renomear o arquivo original nao interrompe a inicializacao.</span>
+                <span>Cria uma cópia gerenciada no LocalAppData e inicia o Studio minimizado. Mover ou renomear o arquivo original não interrompe a inicialização.</span>
               </div>
               <input id="startWithWindows" type="checkbox">
               <i></i>
@@ -77,9 +85,18 @@
             <label class="toggle-row">
               <div>
                 <strong>Ativar presence ao iniciar</strong>
-                <span>Ativa o perfil selecionado quando o Studio abrir. Se o Discord ainda nao estiver pronto, aguarda e tenta novamente com intervalos seguros.</span>
+                <span>Ativa o perfil selecionado quando o Studio abrir. Se o Discord ainda não estiver pronto, aguarda e tenta novamente em intervalos seguros.</span>
               </div>
               <input id="autoStartPresence" type="checkbox">
+              <i></i>
+            </label>
+
+            <label class="toggle-row">
+              <div>
+                <strong>Reconectar automaticamente</strong>
+                <span>Se o Discord fechar ou reiniciar com a presence ativa, o Studio reconecta sozinho e mantém o tempo decorrido.</span>
+              </div>
+              <input id="autoReconnect" type="checkbox">
               <i></i>
             </label>
           </div>
@@ -100,11 +117,11 @@
             <legend>Textos</legend>
             <label>
               <span>Detalhes</span>
-              <input id="details" name="details" maxlength="128" placeholder="O que voce esta fazendo?">
+              <input id="details" name="details" maxlength="128" placeholder="O que você está fazendo?">
             </label>
             <label>
               <span>Estado</span>
-              <input id="state" name="state" maxlength="128" placeholder="Uma descricao complementar">
+              <input id="state" name="state" maxlength="128" placeholder="Uma descrição complementar">
             </label>
           </fieldset>
 
@@ -112,7 +129,7 @@
             <legend>Imagens</legend>
             <label>
               <span>Chave da imagem grande</span>
-              <input id="largeImageKey" name="largeImageKey" placeholder="Ex: logo">
+              <input id="largeImageKey" name="largeImageKey" maxlength="256" placeholder="Ex: logo">
             </label>
             <label>
               <span>Texto da imagem grande</span>
@@ -120,7 +137,7 @@
             </label>
             <label>
               <span>Chave da imagem pequena</span>
-              <input id="smallImageKey" name="smallImageKey" placeholder="Ex: online">
+              <input id="smallImageKey" name="smallImageKey" maxlength="256" placeholder="Ex: online">
             </label>
             <label>
               <span>Texto da imagem pequena</span>
@@ -130,30 +147,30 @@
           </fieldset>
 
           <fieldset>
-            <legend>Botoes</legend>
+            <legend>Botões</legend>
             <label>
-              <span>Botao 1</span>
-              <input id="button1Label" name="button1Label" maxlength="32" placeholder="Ex: Ver portfolio">
+              <span>Botão 1</span>
+              <input id="button1Label" name="button1Label" maxlength="32" placeholder="Ex: Ver portfólio">
             </label>
             <label>
-              <span>URL do botao 1</span>
-              <input id="button1Url" name="button1Url" type="url" placeholder="https://...">
+              <span>URL do botão 1</span>
+              <input id="button1Url" name="button1Url" type="url" maxlength="512" placeholder="https://...">
             </label>
             <label>
-              <span>Botao 2</span>
+              <span>Botão 2</span>
               <input id="button2Label" name="button2Label" maxlength="32" placeholder="Ex: Entrar no Discord">
             </label>
             <label>
-              <span>URL do botao 2</span>
-              <input id="button2Url" name="button2Url" type="url" placeholder="https://...">
+              <span>URL do botão 2</span>
+              <input id="button2Url" name="button2Url" type="url" maxlength="512" placeholder="https://...">
             </label>
-            <p class="field-note">Preencha o texto e a URL juntos. No Discord, teste os botoes visualizando seu perfil por outra conta.</p>
+            <p class="field-note">Preencha o texto e a URL juntos. No Discord, teste os botões visualizando seu perfil por outra conta.</p>
           </fieldset>
 
           <label class="toggle-row">
             <div>
               <strong>Mostrar tempo decorrido</strong>
-              <span>Inicia o cronometro ao ativar a presence.</span>
+              <span>Inicia o cronômetro ao ativar a presence.</span>
             </div>
             <input id="showTimer" name="showTimer" type="checkbox">
             <i></i>
@@ -172,18 +189,29 @@
 
         <div class="tab-content" id="tabMedia" hidden>
           <section class="music-panel">
-            <label class="toggle-row music-toggle">
-              <div>
-                <strong>Modo de midia</strong>
-                <span>Mostra sua midia em reproducao no momento. Enquanto nenhuma midia estiver em execucao, retoma sua presence configurada.</span>
-              </div>
-              <input id="musicMode" name="musicMode" type="checkbox">
-              <i></i>
-            </label>
+            <div class="music-options">
+              <label class="toggle-row music-toggle">
+                <div>
+                  <strong>Modo de mídia</strong>
+                  <span>Mostra a mídia em reprodução no momento. Enquanto nenhuma mídia estiver tocando, retoma a presence configurada. Vale para este perfil.</span>
+                </div>
+                <input id="musicMode" name="musicMode" type="checkbox">
+                <i></i>
+              </label>
+
+              <label class="toggle-row">
+                <div>
+                  <strong>Buscar capa do álbum</strong>
+                  <span>Procura a capa no iTunes usando o título e o artista da faixa. Desligado, nada é enviado à Apple e a imagem grande do perfil é usada. Vale para todos os perfis.</span>
+                </div>
+                <input id="musicCoverLookup" type="checkbox">
+                <i></i>
+              </label>
+            </div>
 
             <div class="music-panel-heading">
               <span class="eyebrow">FONTES</span>
-              <p>Escolha quais aplicativos podem alimentar o modo de midia.</p>
+              <p>Escolha quais aplicativos podem alimentar o modo de mídia.</p>
             </div>
             <div class="music-sources" id="musicSources"></div>
           </section>
@@ -192,7 +220,7 @@
 
       <aside class="preview-column">
         <div class="sticky">
-          <span class="eyebrow">PRE-VISUALIZACAO</span>
+          <span class="eyebrow">PRÉ-VISUALIZAÇÃO</span>
           <div class="discord-card">
             <div class="card-topline">
               <strong id="previewMode">JOGANDO</strong>
@@ -211,7 +239,7 @@
               </div>
               <div class="activity-copy">
                 <strong id="previewApp">Seu aplicativo</strong>
-                <span id="previewDetails">Criando algo incrivel</span>
+                <span id="previewDetails">Criando algo incrível</span>
                 <span id="previewState">No RickDev Presence Studio</span>
                 <span class="timer" id="previewTimer">00:00 decorrido</span>
                 <div class="music-progress" id="musicProgress">
@@ -251,12 +279,12 @@
     <div class="update-overlay" id="updateModal" aria-hidden="true">
       <section class="update-modal" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
         <button class="update-close" id="updateCloseButton" type="button" aria-label="Fechar">&times;</button>
-        <span class="eyebrow">NOVA VERSAO DISPONIVEL</span>
-        <h2 id="updateTitle">Atualizacao do RickDev Presence Studio</h2>
+        <span class="eyebrow">NOVA VERSÃO DISPONÍVEL</span>
+        <h2 id="updateTitle">Atualização do RickDev Presence Studio</h2>
         <div class="update-version" id="updateVersion"></div>
         <div class="update-notes" id="updateNotes"></div>
         <div class="update-actions">
-          <button class="secondary-button" id="updateLaterButton" type="button">Agora nao</button>
+          <button class="secondary-button" id="updateLaterButton" type="button">Agora não</button>
           <button class="primary-button" id="updateOpenButton" type="button">
             <span>Abrir no GitHub</span>
             <i>&#8599;</i>

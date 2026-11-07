@@ -1,17 +1,35 @@
-const { app, BrowserWindow, ipcMain, shell, Menu, Tray, net } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell, Menu, Tray, net } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const DiscordRPC = require("discord-rpc");
 const { compareVersions } = require("./version");
 const { createStartupManager } = require("./startup");
 const {
+  MAX_IMPORT_BYTES,
+  buildProfilesExport,
+  createConfigStore,
+  defaultSettings,
+  normalizeConfig,
+  parseProfilesImport,
+  writeJsonAtomic
+} = require("./config");
+const {
   buildMusicActivity,
   createMediaWatcher,
   derivePresentation,
   hasSeeked,
   mediaSignature,
+  presenceText,
   selectMediaSession
 } = require("./media");
+
+// Discord only accepts a handful of activity updates per window (about five
+// every 20 seconds), so media updates are spaced out and coalesced.
+const MUSIC_UPDATE_SPACING_MS = 4000;
+const SEEK_REAPPLY_MIN_MS = 5000;
+const RPC_CLOSE_TIMEOUT_MS = 3000;
+const RECONNECT_FIRST_DELAY_MS = 5000;
+const RETRY_DELAYS_MS = [15 * 1000, 30 * 1000, 60 * 1000];
 
 let mainWindow;
 let tray;
@@ -21,13 +39,17 @@ let activeConfig;
 let activeStartTimestamp;
 let priorityInterval;
 let priorityUpdatePromise;
-let autoStartTimer;
-let autoStartAttempt = 0;
-let autoStartToken = 0;
+let connectionQueue = Promise.resolve();
+let retryTimer;
+let retryAttempt = 0;
+let retryToken = 0;
+let retryKind;
 let updateCheckStarted = false;
 let isQuitting = false;
 let trayNoticeShown = false;
 let startupStatus = { ok: true, active: false };
+let lastStatus = { status: "offline", message: "Desconectado" };
+let corruptedConfigBackup;
 let mediaWatcher;
 let lastMediaPayload;
 let latestMedia;
@@ -35,6 +57,10 @@ let latestPresentation = { mode: "fallback", paused: false };
 let lastPlayingAt = 0;
 let rendererWatchingMusic = false;
 let musicUpdatePromise;
+let musicUpdateTimer;
+let musicUpdateQueued = false;
+let musicUpdateForce = false;
+let lastMusicUpdateAt = 0;
 let lastAppliedMusic;
 let lastBroadcastMusic;
 let musicTrackKey;
@@ -46,96 +72,20 @@ const trackArtCache = new Map();
 const applicationCache = new Map();
 const githubRepository = "Eu-RickDev/RickDev-presence-studio";
 
-const defaultSettings = {
-  startWithWindows: false,
-  autoStartPresence: false,
-  musicIgnoredApps: []
-};
-
 let runtimeSettings = { ...defaultSettings };
 const startupManager = createStartupManager(app);
-
-const defaults = {
-  clientId: "",
-  details: "Criando algo incrivel",
-  state: "No RickDev Presence Studio",
-  largeImageKey: "",
-  largeImageText: "",
-  smallImageKey: "",
-  smallImageText: "",
-  button1Label: "",
-  button1Url: "",
-  button2Label: "",
-  button2Url: "",
-  showTimer: true,
-  highPriority: false,
-  musicMode: false
-};
-
-function configPath() {
-  return path.join(app.getPath("userData"), "presence-config.json");
-}
-
-function emptyProfile(index) {
-  return {
-    name: `Perfil ${index + 1}`,
-    config: { ...defaults }
-  };
-}
-
-function normalizeProfiles(data) {
-  // A test build briefly stored per-type rules as an object; its keys count
-  // as blocked apps.
-  const rawIgnored = Array.isArray(data?.settings?.musicIgnoredApps)
-    ? data.settings.musicIgnoredApps
-    : data?.settings?.musicSourceRules && typeof data.settings.musicSourceRules === "object"
-      ? Object.keys(data.settings.musicSourceRules)
-      : [];
-
-  const settings = {
-    startWithWindows: Boolean(data?.settings?.startWithWindows),
-    autoStartPresence: Boolean(data?.settings?.autoStartPresence),
-    musicIgnoredApps: [...new Set(rawIgnored
-      .map((app) => String(app).trim().toLowerCase().slice(0, 128))
-      .filter(Boolean))].slice(0, 30)
-  };
-
-  if (Array.isArray(data?.profiles)) {
-    return {
-      activeProfile: Math.min(Math.max(Number(data.activeProfile) || 0, 0), 4),
-      settings,
-      profiles: Array.from({ length: 5 }, (_item, index) => {
-        const profile = data.profiles[index] || emptyProfile(index);
-        return {
-          name: String(profile.name || `Perfil ${index + 1}`).slice(0, 24),
-          config: { ...defaults, ...(profile.config || {}) }
-        };
-      })
-    };
+const configStore = createConfigStore(() => app.getPath("userData"), {
+  onCorrupted: (backup) => {
+    corruptedConfigBackup = backup;
   }
-
-  return {
-    activeProfile: 0,
-    settings,
-    profiles: [
-      { name: "Perfil 1", config: { ...defaults, ...(data || {}) } },
-      ...Array.from({ length: 4 }, (_item, index) => emptyProfile(index + 1))
-    ]
-  };
-}
+});
 
 function loadConfig() {
-  try {
-    return normalizeProfiles(JSON.parse(fs.readFileSync(configPath(), "utf8")));
-  } catch {
-    return normalizeProfiles();
-  }
+  return configStore.load();
 }
 
-function saveConfig(profiles) {
-  const normalized = normalizeProfiles(profiles);
-  fs.writeFileSync(configPath(), JSON.stringify(normalized, null, 2), "utf8");
-  return normalized;
+function saveConfig(data) {
+  return configStore.save(data);
 }
 
 function applicationIconUrl(clientId, icon) {
@@ -149,23 +99,31 @@ function applicationAssetUrl(clientId, assetId) {
 }
 
 async function fetchDiscordJson(url) {
-  const response = await net.fetch(url, {
-    headers: { "User-Agent": "RickDev Presence Studio" }
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
 
-  if (!response.ok) {
-    throw new Error(response.status === 404
-      ? "Aplicativo nao encontrado no Discord."
-      : "Nao foi possivel consultar o aplicativo no Discord.");
+  try {
+    const response = await net.fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "RickDev Presence Studio" }
+    });
+
+    if (!response.ok) {
+      throw new Error(response.status === 404
+        ? "Aplicativo não encontrado no Discord."
+        : "Não foi possível consultar o aplicativo no Discord.");
+    }
+
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return response.json();
 }
 
 async function lookupApplication(value) {
   const clientId = String(value || "").trim();
   if (!/^\d{17,20}$/.test(clientId)) {
-    throw new Error("Informe um Application ID valido do Discord.");
+    throw new Error("Informe um Application ID válido do Discord.");
   }
 
   const cached = applicationCache.get(clientId);
@@ -183,7 +141,7 @@ async function lookupApplication(value) {
     id: clientId,
     name: application.name || `App ${clientId.slice(0, 8)}`,
     iconUrl: applicationIconUrl(clientId, application.icon),
-    assets: Object.fromEntries(assets.map((asset) => [
+    assets: Object.fromEntries((Array.isArray(assets) ? assets : []).map((asset) => [
       asset.name,
       applicationAssetUrl(clientId, asset.id)
     ]))
@@ -223,7 +181,7 @@ async function checkForUpdates() {
       currentVersion: app.getVersion(),
       version: String(release.tag_name || "").replace(/^v/i, ""),
       name: release.name || `RickDev Presence Studio ${release.tag_name}`,
-      notes: String(release.body || "Esta versao nao possui notas de lancamento.").slice(0, 20000),
+      notes: String(release.body || "Esta versão não possui notas de lançamento.").slice(0, 20000),
       url: /^https:\/\/github\.com\//i.test(release.html_url || "")
         ? release.html_url
         : `https://github.com/${githubRepository}/releases/latest`
@@ -236,7 +194,7 @@ async function checkForUpdates() {
     if (mainWindow?.isVisible() === false && process.platform === "win32") {
       tray?.displayBalloon({
         title: `RickDev Presence Studio ${update.version}`,
-        content: "Uma nova versao esta disponivel. Clique para ver as novidades."
+        content: "Uma nova versão está disponível. Clique para ver as novidades."
       });
     }
   } catch {
@@ -251,16 +209,27 @@ function scheduleUpdateCheck() {
   timer.unref();
 }
 
+function presenceConnected() {
+  return Boolean(rpc && activeConfig);
+}
+
+function statusPayload() {
+  const connected = presenceConnected();
+  return {
+    ...lastStatus,
+    connected,
+    startedAt: connected ? activeStartTimestamp?.getTime() : undefined
+  };
+}
+
 function sendStatus(status, message) {
-  mainWindow?.webContents.send("presence:status", {
-    status,
-    message,
-    startedAt: status === "online" ? activeStartTimestamp?.getTime() : undefined
-  });
+  lastStatus = { status, message };
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("presence:status", statusPayload());
 }
 
 function normalizeUrl(value) {
-  const trimmed = value.trim();
+  const trimmed = String(value || "").trim();
   if (!trimmed) return "";
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
@@ -274,8 +243,8 @@ function buildButtons(config) {
 
 function validateButtons(config) {
   const pairs = [
-    [config.button1Label.trim(), config.button1Url.trim(), "Botao 1"],
-    [config.button2Label.trim(), config.button2Url.trim(), "Botao 2"]
+    [config.button1Label.trim(), config.button1Url.trim(), "Botão 1"],
+    [config.button2Label.trim(), config.button2Url.trim(), "Botão 2"]
   ];
 
   for (const [label, url, name] of pairs) {
@@ -284,14 +253,14 @@ function validateButtons(config) {
     }
 
     if (label && label.length > 32) {
-      throw new Error(`${name}: o texto deve ter no maximo 32 caracteres.`);
+      throw new Error(`${name}: o texto deve ter no máximo 32 caracteres.`);
     }
 
     if (url) {
       try {
         new URL(normalizeUrl(url));
       } catch {
-        throw new Error(`${name}: informe uma URL valida.`);
+        throw new Error(`${name}: informe uma URL válida.`);
       }
     }
   }
@@ -300,13 +269,14 @@ function validateButtons(config) {
 function buildActivity(config, startTimestamp) {
   validateButtons(config);
 
+  // presenceText pads one-character texts, which Discord would reject.
   const activity = {
-    details: config.details.trim() || undefined,
-    state: config.state.trim() || undefined,
+    details: presenceText(config.details) || undefined,
+    state: presenceText(config.state) || undefined,
     largeImageKey: config.largeImageKey.trim() || undefined,
-    largeImageText: config.largeImageText.trim() || undefined,
+    largeImageText: presenceText(config.largeImageText) || undefined,
     smallImageKey: config.smallImageKey.trim() || undefined,
-    smallImageText: config.smallImageText.trim() || undefined,
+    smallImageText: presenceText(config.smallImageText) || undefined,
     instance: false
   };
 
@@ -366,11 +336,21 @@ function lookupTrackArt(media) {
   return pending;
 }
 
+// The user can turn the iTunes lookup off (it sends title and artist to Apple);
+// musicArtSupported tracks whether this Discord client accepts image URLs.
+function coverLookupAllowed() {
+  return runtimeSettings.musicCoverLookup !== false;
+}
+
+function coverLookupEnabled() {
+  return coverLookupAllowed() && musicArtSupported;
+}
+
 function broadcastMusicState(force = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
   const media = latestMedia?.active ? latestMedia : undefined;
-  const cachedArt = media ? trackArtCache.get(trackArtKey(media)) : undefined;
+  const cachedArt = media && coverLookupAllowed() ? trackArtCache.get(trackArtKey(media)) : undefined;
   const artUrl = typeof cachedArt === "string" ? cachedArt : "";
 
   const ignoredApps = new Set((runtimeSettings.musicIgnoredApps || []).map((app) => app.toLowerCase()));
@@ -414,10 +394,10 @@ function handleMediaState(payload) {
   latestPresentation = derivePresentation(state, lastPlayingAt);
   broadcastMusicState();
 
-  if (state.active && musicArtSupported) {
+  if (state.active && coverLookupEnabled()) {
     const key = trackArtKey(state);
     lookupTrackArt(state).then((url) => {
-      if (!url || !latestMedia?.active || trackArtKey(latestMedia) !== key) return;
+      if (!url || !coverLookupEnabled() || !latestMedia?.active || trackArtKey(latestMedia) !== key) return;
       broadcastMusicState();
       // A cover that resolved after the presence was applied does not change
       // the signature; force one reapply so Discord picks it up.
@@ -511,7 +491,7 @@ async function setMusicActivity(activity, artUrl, fallbackImage) {
     }
   }
 
-  throw new Error("O Discord rejeitou a presence de midia.");
+  throw new Error("O Discord rejeitou a presence de mídia.");
 }
 
 async function applyMusicPresence(signature) {
@@ -519,7 +499,7 @@ async function applyMusicPresence(signature) {
   const presentation = latestPresentation;
 
   if (presentation.mode === "music" && media?.active) {
-    const artUrl = musicArtSupported ? await lookupTrackArt(media) : "";
+    const artUrl = coverLookupEnabled() ? await lookupTrackArt(media) : "";
     if (!rpc || !activeConfig?.musicMode) return;
 
     if (musicTrackKey !== trackArtKey(media)) {
@@ -545,36 +525,80 @@ async function applyMusicPresence(signature) {
       playing: media.playing && !presentation.paused
     };
     sendStatus("online", (presentation.paused
-      ? `Modo de midia: em pausa - ${media.title}`
-      : `Modo de midia: ${media.title}${media.artist ? ` - ${media.artist}` : ""}`).slice(0, 140));
+      ? `Modo de mídia: em pausa - ${media.title}`
+      : `Modo de mídia: ${media.title}${media.artist ? ` - ${media.artist}` : ""}`).slice(0, 140));
     return;
   }
 
+  if (!rpc || !activeConfig) return;
   await rpc.setActivity(buildActivity(activeConfig, activeStartTimestamp));
   lastAppliedMusic = { signature, artUrl: "", positionMs: 0, atMs: Date.now(), playing: false };
-  sendStatus("online", "Modo de midia: sem midia agora - presence configurada ativa");
+  sendStatus("online", "Modo de mídia: nenhuma mídia agora - presence configurada ativa");
 }
 
+function musicPresenceOutdated(signature, now = Date.now()) {
+  if (lastAppliedMusic?.signature !== signature) return true;
+  return hasSeeked(lastAppliedMusic, latestMedia, now)
+    && now - lastAppliedMusic.atMs >= SEEK_REAPPLY_MIN_MS;
+}
+
+function resetMusicUpdates() {
+  if (musicUpdateTimer) clearTimeout(musicUpdateTimer);
+  musicUpdateTimer = undefined;
+  musicUpdateQueued = false;
+  musicUpdateForce = false;
+}
+
+// Skipping through tracks produces a change on every watcher tick. Updates are
+// spaced out and, once the slot frees up, the latest state is the one applied,
+// so a burst never ends on a stale track.
 function maybeUpdateMusicPresence(force = false) {
   if (!rpc || !activeConfig?.musicMode || isQuitting) return;
 
-  const signature = mediaSignature(latestPresentation, latestMedia);
-  const now = Date.now();
+  const wantsForce = force || musicUpdateForce;
+  if (!wantsForce && !musicPresenceOutdated(mediaSignature(latestPresentation, latestMedia))) return;
+  musicUpdateForce = wantsForce;
 
-  if (!force && lastAppliedMusic?.signature === signature) {
-    if (!hasSeeked(lastAppliedMusic, latestMedia, now)) return;
-    if (now - lastAppliedMusic.atMs < 5000) return;
+  if (musicUpdatePromise) {
+    musicUpdateQueued = true;
+    return;
+  }
+  if (musicUpdateTimer) return;
+
+  const wait = lastMusicUpdateAt + MUSIC_UPDATE_SPACING_MS - Date.now();
+  if (wait > 0) {
+    musicUpdateTimer = setTimeout(() => {
+      musicUpdateTimer = undefined;
+      runMusicUpdate();
+    }, wait);
+    return;
   }
 
-  if (musicUpdatePromise) return;
+  runMusicUpdate();
+}
+
+function runMusicUpdate() {
+  const force = musicUpdateForce;
+  musicUpdateForce = false;
+  musicUpdateQueued = false;
+  if (!rpc || !activeConfig?.musicMode || isQuitting) return;
+
+  const signature = mediaSignature(latestPresentation, latestMedia);
+  if (!force && !musicPresenceOutdated(signature)) return;
+
+  lastMusicUpdateAt = Date.now();
   musicUpdatePromise = applyMusicPresence(signature)
     .catch((error) => {
       if (rpc && activeConfig?.musicMode) {
-        sendStatus("error", error.message || "Falha ao atualizar o modo de midia.");
+        sendStatus("error", error.message || "Falha ao atualizar o modo de mídia.");
       }
     })
     .finally(() => {
       musicUpdatePromise = undefined;
+      if (musicUpdateQueued) {
+        musicUpdateQueued = false;
+        maybeUpdateMusicPresence();
+      }
     });
 }
 
@@ -585,17 +609,28 @@ function stopPriorityLoop() {
 
 function clearActivePresence() {
   stopPriorityLoop();
+  resetMusicUpdates();
   activeConfig = undefined;
   activeStartTimestamp = undefined;
   lastAppliedMusic = undefined;
   syncMediaWatcher();
 }
 
-function stopAutoStartRetries() {
-  if (autoStartTimer) clearTimeout(autoStartTimer);
-  autoStartTimer = undefined;
-  autoStartAttempt = 0;
-  autoStartToken += 1;
+async function settlePendingUpdates() {
+  await Promise.allSettled([musicUpdatePromise, priorityUpdatePromise].filter(Boolean));
+}
+
+// Closing an IPC client waits for Discord to answer; never let a hung client
+// block the connection queue forever.
+function settleWithin(operation, timeoutMs) {
+  let timer;
+  const pending = Promise.resolve()
+    .then(operation)
+    .catch(() => {});
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  return Promise.race([pending, timeout]).finally(() => clearTimeout(timer));
 }
 
 function isDiscordUnavailableError(error) {
@@ -603,57 +638,146 @@ function isDiscordUnavailableError(error) {
     .test(String(error?.message || error));
 }
 
+function describeConnectionError(error) {
+  const message = String(error?.message || error || "");
+  if (/Could not connect|ECONNREFUSED|ENOENT/i.test(message)) {
+    return "Discord não encontrado. Abra o Discord desktop e tente novamente.";
+  }
+  if (/RPC_CONNECTION_TIMEOUT/i.test(message)) {
+    return "O Discord não respondeu a tempo. Tente novamente em instantes.";
+  }
+  if (/connection closed/i.test(message)) {
+    return "O Discord encerrou a conexão. Confira se o Application ID está correto.";
+  }
+  if (isActivityValidationError(error)) {
+    return `O Discord recusou a presence: ${message}`;
+  }
+  return message || "Não foi possível conectar.";
+}
+
+// Every connect/disconnect runs one at a time, so a manual click can never
+// interleave with an automatic retry or with another click.
+function enqueueConnection(task) {
+  const run = connectionQueue.then(task);
+  connectionQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function connect(config, options) {
+  return enqueueConnection(() => connectNow(config, options));
+}
+
+function disconnect() {
+  stopConnectRetries();
+  return enqueueConnection(() => disconnectNow());
+}
+
 async function discardRpcClient() {
   const client = rpc;
   rpc = undefined;
   activeClientId = undefined;
   clearActivePresence();
-
-  if (!client) return;
-  try {
-    await client.destroy();
-  } catch {
-    // A failed IPC connection may not have a transport to close.
-  }
+  if (client) await settleWithin(() => client.destroy(), RPC_CLOSE_TIMEOUT_MS);
 }
 
-function scheduleAutoStart(initialDelay = 8000) {
-  stopAutoStartRetries();
-  if (!runtimeSettings.autoStartPresence) return;
+async function disconnectNow(options = {}) {
+  const client = rpc;
+  clearActivePresence();
+  await settlePendingUpdates();
+  // Detach before closing so the client's own "disconnected" event is ignored.
+  rpc = undefined;
+  activeClientId = undefined;
 
-  const token = autoStartToken;
+  if (client) {
+    await settleWithin(() => client.clearActivity(), RPC_CLOSE_TIMEOUT_MS);
+    await settleWithin(() => client.destroy(), RPC_CLOSE_TIMEOUT_MS);
+  }
+  if (!options.silent) sendStatus("offline", "Desconectado");
+}
+
+function stopConnectRetries() {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = undefined;
+  retryAttempt = 0;
+  retryToken += 1;
+  retryKind = undefined;
+}
+
+function retryEnabled(kind) {
+  return kind === "reconnect" ? runtimeSettings.autoReconnect : runtimeSettings.autoStartPresence;
+}
+
+// Shared by the activation on startup and the reconnection after Discord
+// closes: keep trying with growing intervals while Discord is unavailable.
+function scheduleConnectRetries(kind, initialDelay, resolveTarget) {
+  stopConnectRetries();
+  if (!retryEnabled(kind)) return false;
+
+  retryKind = kind;
+  const token = retryToken;
+  const label = kind === "reconnect" ? "Reconexão" : "Autoativação";
 
   const scheduleAttempt = (delay) => {
-    autoStartTimer = setTimeout(async () => {
-      autoStartTimer = undefined;
-      if (token !== autoStartToken || isQuitting || !runtimeSettings.autoStartPresence) return;
+    retryTimer = setTimeout(async () => {
+      retryTimer = undefined;
+      if (token !== retryToken || isQuitting || !retryEnabled(kind)) return;
 
-      autoStartAttempt += 1;
-      sendStatus("connecting", `Aguardando o Discord - tentativa ${autoStartAttempt}`);
+      retryAttempt += 1;
+      sendStatus("connecting", kind === "reconnect"
+        ? `Reconectando ao Discord - tentativa ${retryAttempt}`
+        : `Aguardando o Discord - tentativa ${retryAttempt}`);
 
       try {
-        const store = loadConfig();
-        const config = store.profiles[store.activeProfile].config;
-        await connect(config);
-        if (token === autoStartToken) autoStartAttempt = 0;
+        const target = resolveTarget();
+        await connect(target.config, { startTimestamp: target.startTimestamp });
+        if (token === retryToken) {
+          retryAttempt = 0;
+          retryKind = undefined;
+        }
       } catch (error) {
-        await discardRpcClient();
-        if (token !== autoStartToken || isQuitting || !runtimeSettings.autoStartPresence) return;
+        if (token !== retryToken || isQuitting || !retryEnabled(kind)) return;
 
         if (!isDiscordUnavailableError(error)) {
-          sendStatus("error", `Autoativacao: ${error.message || "configuracao invalida"}`);
+          retryKind = undefined;
+          sendStatus("error", `${label}: ${describeConnectionError(error)}`);
           return;
         }
 
-        const retryDelay = Math.min(15 * 1000 * (2 ** Math.min(autoStartAttempt - 1, 2)), 60 * 1000);
-        sendStatus("connecting", `Discord indisponivel. Nova tentativa em ${retryDelay / 1000}s`);
+        const retryDelay = RETRY_DELAYS_MS[Math.min(retryAttempt - 1, RETRY_DELAYS_MS.length - 1)];
+        sendStatus("connecting", `Discord indisponível. Nova tentativa em ${retryDelay / 1000}s`);
         scheduleAttempt(retryDelay);
       }
     }, delay);
-    autoStartTimer.unref();
+    retryTimer.unref?.();
   };
 
   scheduleAttempt(initialDelay);
+  return true;
+}
+
+function scheduleAutoStart(initialDelay = 8000) {
+  scheduleConnectRetries("autostart", initialDelay, () => {
+    const store = loadConfig();
+    return { config: store.profiles[store.activeProfile].config };
+  });
+}
+
+function handleClientDisconnected(client) {
+  // A replaced or discarded client may still report its close later.
+  if (rpc !== client) return;
+
+  const target = activeConfig && !isQuitting
+    ? { config: activeConfig, startTimestamp: activeStartTimestamp }
+    : undefined;
+  rpc = undefined;
+  activeClientId = undefined;
+  clearActivePresence();
+
+  if (target && scheduleConnectRetries("reconnect", RECONNECT_FIRST_DELAY_MS, () => target)) {
+    sendStatus("connecting", `Discord desconectado. Reconectando em ${RECONNECT_FIRST_DELAY_MS / 1000}s`);
+    return;
+  }
+  sendStatus("offline", "Discord desconectado");
 }
 
 function startPriorityLoop() {
@@ -681,77 +805,140 @@ function startPriorityLoop() {
   priorityInterval.unref();
 }
 
-async function disconnect(cancelAutoStart = true) {
-  if (cancelAutoStart) stopAutoStartRetries();
-  clearActivePresence();
-  if (musicUpdatePromise) await musicUpdatePromise;
-  if (priorityUpdatePromise) {
-    try {
-      await priorityUpdatePromise;
-    } catch {
-      // The pending refresh already reports its own error.
-    }
-  }
-  if (rpc) {
-    try {
-      await rpc.clearActivity();
-      rpc.destroy();
-    } catch {
-      // The Discord client may already be closed.
-    }
-  }
-  rpc = undefined;
-  activeClientId = undefined;
-  sendStatus("offline", "Desconectado");
-}
-
-async function connect(config) {
+async function connectNow(rawConfig, options = {}) {
+  const config = normalizeConfig(rawConfig);
   const clientId = config.clientId.trim();
   if (!/^\d{17,20}$/.test(clientId)) {
-    throw new Error("Informe um Application ID valido do Discord.");
+    throw new Error("Informe um Application ID válido do Discord.");
   }
 
+  const startTimestamp = config.showTimer ? (options.startTimestamp || new Date()) : undefined;
+  // Validate before touching the connection: a bad field must not drop it.
+  const activity = buildActivity(config, startTimestamp);
+
   stopPriorityLoop();
-  if (musicUpdatePromise) await musicUpdatePromise;
-  if (priorityUpdatePromise) {
-    try {
-      await priorityUpdatePromise;
-    } catch {
-      // A manual activation below will replace the failed refresh.
-    }
-  }
-  if (rpc && activeClientId !== clientId) await disconnect(false);
+  resetMusicUpdates();
+  await settlePendingUpdates();
+  if (rpc && activeClientId !== clientId) await disconnectNow({ silent: true });
 
   if (!rpc) {
     sendStatus("connecting", "Conectando ao Discord...");
-    rpc = new DiscordRPC.Client({ transport: "ipc" });
+    const client = new DiscordRPC.Client({ transport: "ipc" });
+    rpc = client;
     activeClientId = clientId;
     musicTypeSupported = true;
     musicArtSupported = true;
+    client.on("disconnected", () => handleClientDisconnected(client));
 
-    rpc.on("disconnected", () => {
-      clearActivePresence();
-      rpc = undefined;
-      activeClientId = undefined;
-      sendStatus("offline", "Discord desconectado");
-    });
-
-    await rpc.login({ clientId });
+    try {
+      await client.login({ clientId });
+    } catch (error) {
+      if (rpc === client) await discardRpcClient();
+      throw error;
+    }
+    if (rpc !== client) throw new Error("connection closed");
   }
 
-  activeConfig = { ...config };
-  activeStartTimestamp = config.showTimer ? new Date() : undefined;
-  await rpc.setActivity(buildActivity(activeConfig, activeStartTimestamp));
-  startPriorityLoop();
-  sendStatus("online", config.musicMode
-    ? "Modo de midia ativo - aguardando reproducao"
-    : config.highPriority ? "Presence ativa - alta prioridade" : "Presence ativa");
+  const client = rpc;
+  try {
+    await client.setActivity(activity);
+  } catch (error) {
+    if (rpc === client && activeConfig) {
+      // The connection is fine and Discord still shows the previous activity:
+      // keep it running instead of disconnecting.
+      startPriorityLoop();
+      maybeUpdateMusicPresence();
+    } else if (rpc === client) {
+      await discardRpcClient();
+    }
+    throw error;
+  }
 
+  // A reconnection scheduled while this call was running would bring back the
+  // old configuration; this one is now the live presence.
+  stopConnectRetries();
+  activeConfig = config;
+  activeStartTimestamp = startTimestamp;
   // The configured presence was just applied, which matches the fallback state;
   // the next media tick promotes it to the playing track.
   lastAppliedMusic = { signature: "fallback", artUrl: "", positionMs: 0, atMs: Date.now(), playing: false };
+  startPriorityLoop();
+  sendStatus("online", config.musicMode
+    ? "Modo de mídia ativo - aguardando reprodução"
+    : config.highPriority ? "Presence ativa - alta prioridade" : "Presence ativa");
+
   syncMediaWatcher();
   if (activeConfig.musicMode && latestMedia) maybeUpdateMusicPresence();
+}
+
+function openExternalLink(url) {
+  let parsed;
+  try {
+    parsed = new URL(String(url || ""));
+  } catch {
+    throw new Error("Link não permitido.");
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Link não permitido.");
+  }
+  return shell.openExternal(parsed.toString());
+}
+
+function profileFileFilters() {
+  return [{ name: "Perfis do RickDev Presence Studio", extensions: ["json"] }];
+}
+
+async function exportProfiles() {
+  const store = loadConfig();
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: "Exportar perfis",
+    buttonLabel: "Exportar",
+    defaultPath: path.join(app.getPath("documents"), "rickdev-presence-perfis.json"),
+    filters: profileFileFilters()
+  });
+  if (canceled || !filePath) return { ok: false, canceled: true };
+
+  writeJsonAtomic(filePath, buildProfilesExport(store, app.getVersion()));
+  return { ok: true, filePath, count: store.profiles.length };
+}
+
+async function importProfiles() {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: "Importar perfis",
+    buttonLabel: "Importar",
+    properties: ["openFile"],
+    filters: profileFileFilters()
+  });
+  if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+
+  const filePath = filePaths[0];
+  if (fs.statSync(filePath).size > MAX_IMPORT_BYTES) {
+    throw new Error("O arquivo é grande demais para ser um arquivo de perfis.");
+  }
+  const imported = parseProfilesImport(fs.readFileSync(filePath, "utf8"));
+
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    title: "Importar perfis",
+    message: imported.count === 1
+      ? "Substituir os perfis atuais pelo perfil do arquivo?"
+      : `Substituir os perfis atuais pelos ${imported.count} perfis do arquivo?`,
+    detail: "Os 5 perfis atuais serão substituídos. Para guardar uma cópia, exporte-os antes. "
+      + "A presence ativa só muda quando você clicar em Atualizar presence.",
+    buttons: ["Importar", "Cancelar"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (response !== 0) return { ok: false, canceled: true };
+
+  const current = loadConfig();
+  const normalized = saveConfig({
+    ...current,
+    activeProfile: imported.activeProfile,
+    profiles: imported.profiles
+  });
+  return { ok: true, count: imported.count, store: { ...normalized, startupStatus } };
 }
 
 function createWindow(show = true) {
@@ -772,8 +959,21 @@ function createWindow(show = true) {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     }
+  });
+
+  // The window only ever shows the bundled page: links open in the browser and
+  // dropped files or URLs never replace the app (and its preload API).
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    Promise.resolve()
+      .then(() => openExternalLink(url))
+      .catch(() => {});
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (url !== mainWindow.webContents.getURL()) event.preventDefault();
   });
 
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
@@ -850,30 +1050,49 @@ app.whenReady().then(async () => {
   createTray();
   trayNoticeShown = launchedHidden;
 
-  ipcMain.handle("config:load", () => ({ ...loadConfig(), startupStatus }));
-  ipcMain.handle("link:open", (_event, url) => {
-    const parsed = new URL(url);
-    if (!["http:", "https:"].includes(parsed.protocol)) {
-      throw new Error("Link nao permitido.");
-    }
-    return shell.openExternal(parsed.toString());
+  ipcMain.handle("config:load", () => {
+    const store = loadConfig();
+    const corruptedBackup = corruptedConfigBackup;
+    corruptedConfigBackup = undefined;
+    return { ...store, startupStatus, presenceStatus: statusPayload(), corruptedBackup };
   });
+  ipcMain.handle("link:open", (_event, url) => openExternalLink(url));
   ipcMain.handle("config:save", async (_event, config) => {
-    const previousStartWithWindows = runtimeSettings.startWithWindows;
+    const previous = runtimeSettings;
     const normalized = saveConfig(config);
     runtimeSettings = { ...normalized.settings };
-    if (runtimeSettings.startWithWindows !== previousStartWithWindows) {
+    if (runtimeSettings.startWithWindows !== previous.startWithWindows) {
       startupStatus = await startupManager.configure(runtimeSettings.startWithWindows);
     }
 
-    if (!runtimeSettings.autoStartPresence) {
-      stopAutoStartRetries();
+    if (retryKind && !retryEnabled(retryKind)) {
+      stopConnectRetries();
+      if (!presenceConnected()) sendStatus("offline", "Desconectado");
+    }
+
+    // Turning the cover lookup off must take the cover out of Discord now.
+    if (previous.musicCoverLookup && !runtimeSettings.musicCoverLookup && lastAppliedMusic?.artUrl) {
+      maybeUpdateMusicPresence(true);
     }
 
     // A blacklist edit must reselect the media source right away.
     if (lastMediaPayload) handleMediaState(lastMediaPayload);
 
     return { ...normalized, startupStatus };
+  });
+  ipcMain.handle("profiles:export", async () => {
+    try {
+      return await exportProfiles();
+    } catch (error) {
+      return { ok: false, error: error.message || "Não foi possível exportar os perfis." };
+    }
+  });
+  ipcMain.handle("profiles:import", async () => {
+    try {
+      return await importProfiles();
+    } catch (error) {
+      return { ok: false, error: error.message || "Não foi possível importar os perfis." };
+    }
   });
   ipcMain.handle("application:lookup", (_event, clientId) => lookupApplication(clientId));
   ipcMain.handle("music:watch", (_event, enabled) => {
@@ -882,28 +1101,18 @@ app.whenReady().then(async () => {
     broadcastMusicState(true);
   });
   ipcMain.handle("presence:connect", async (_event, config) => {
-    stopAutoStartRetries();
+    stopConnectRetries();
     try {
       await connect(config);
       return { ok: true };
     } catch (error) {
-      await discardRpcClient();
-      sendStatus("error", error.message || "Nao foi possivel conectar.");
-      return { ok: false, error: error.message };
+      const message = describeConnectionError(error);
+      if (presenceConnected()) sendStatus("online", "A presence anterior continua ativa");
+      else sendStatus("error", message);
+      return { ok: false, error: message };
     }
   });
-  ipcMain.handle("presence:update", async (_event, config) => {
-    try {
-      await connect(config);
-      sendStatus("online", "Presence atualizada");
-      return { ok: true };
-    } catch (error) {
-      await discardRpcClient();
-      sendStatus("error", error.message || "Falha ao atualizar.");
-      return { ok: false, error: error.message };
-    }
-  });
-  ipcMain.handle("presence:disconnect", disconnect);
+  ipcMain.handle("presence:disconnect", () => disconnect());
 
   if (runtimeSettings.autoStartPresence) {
     scheduleAutoStart(launchedHidden ? 12000 : 3000);
@@ -912,13 +1121,16 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
-  stopAutoStartRetries();
+  stopConnectRetries();
   stopPriorityLoop();
+  resetMusicUpdates();
   if (mediaWatcher) {
     mediaWatcher.stop();
     mediaWatcher = undefined;
   }
-  if (rpc) rpc.destroy();
+  const client = rpc;
+  rpc = undefined;
+  if (client) client.destroy().catch(() => {});
 });
 
 app.on("window-all-closed", () => {

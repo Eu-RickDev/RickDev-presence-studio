@@ -7,8 +7,12 @@ const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
 const profileName = document.querySelector("#profileName");
 const profileTabs = [...document.querySelectorAll("#profileTabs button")];
+const importProfilesButton = document.querySelector("#importProfilesButton");
+const exportProfilesButton = document.querySelector("#exportProfilesButton");
 const startWithWindows = document.querySelector("#startWithWindows");
 const autoStartPresence = document.querySelector("#autoStartPresence");
+const autoReconnect = document.querySelector("#autoReconnect");
+const musicCoverLookup = document.querySelector("#musicCoverLookup");
 const startupStatus = document.querySelector("#startupStatus");
 const updateModal = document.querySelector("#updateModal");
 const updateTitle = document.querySelector("#updateTitle");
@@ -70,13 +74,40 @@ function saveProfiles() {
   return window.presenceAPI.saveConfig(profileStore);
 }
 
+// Writes any edit still waiting for the debounce, so the file on disk matches
+// what is on screen.
+function flushProfiles() {
+  clearTimeout(saveTimeout);
+  saveTimeout = undefined;
+  return saveProfiles();
+}
+
+function scheduleSave() {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    saveTimeout = undefined;
+    saveProfiles();
+  }, 350);
+}
+
+function renderGlobalSettings(settings = {}) {
+  startWithWindows.checked = Boolean(settings.startWithWindows);
+  autoStartPresence.checked = Boolean(settings.autoStartPresence);
+  autoReconnect.checked = settings.autoReconnect !== false;
+  musicCoverLookup.checked = settings.musicCoverLookup !== false;
+}
+
 async function saveGlobalSettings() {
-  if (!profileStore) return;
+  if (!profileStore) return undefined;
   profileStore.settings = {
     startWithWindows: startWithWindows.checked,
     autoStartPresence: autoStartPresence.checked,
+    autoReconnect: autoReconnect.checked,
+    musicCoverLookup: musicCoverLookup.checked,
     musicIgnoredApps: profileStore.settings?.musicIgnoredApps || []
   };
+  clearTimeout(saveTimeout);
+  saveTimeout = undefined;
   const result = await saveProfiles();
   if (result?.settings) profileStore.settings = { ...result.settings };
   renderStartupStatus(result?.startupStatus);
@@ -96,23 +127,19 @@ function renderStartupStatus(status) {
   }
 
   if (status.development && startWithWindows.checked) {
-    startupStatus.textContent = "A configuracao sera aplicada ao executar a versao compilada.";
+    startupStatus.textContent = "A configuração será aplicada ao executar a versão compilada.";
   } else if (status.active && status.managed) {
     startupStatus.textContent = status.updated
-      ? "Copia de inicializacao criada ou atualizada com sucesso."
-      : "Inicializacao protegida pela copia gerenciada no LocalAppData.";
+      ? "Cópia de inicialização criada ou atualizada com sucesso."
+      : "Inicialização protegida pela cópia gerenciada no LocalAppData.";
   } else if (status.retained) {
-    startupStatus.textContent = "Inicializacao desativada. A copia em uso foi mantida e nao sera aberta pelo Windows.";
+    startupStatus.textContent = "Inicialização desativada. A cópia em uso foi mantida e não será aberta pelo Windows.";
   }
 
   if (startupStatus.textContent) startupStatus.classList.add("visible");
 }
 
-function loadProfile(index) {
-  if (!profileStore) return;
-  updateCurrentProfile();
-  activeProfile = index;
-  profileStore.activeProfile = index;
+function showActiveProfile() {
   loadingProfile = true;
   profileName.value = currentProfile().name;
   setConfig(currentProfile().config);
@@ -121,7 +148,28 @@ function loadProfile(index) {
   renderPreview();
   scheduleApplicationLookup(currentProfile().config.clientId, true);
   window.presenceAPI.watchMusic(Boolean(currentProfile().config.musicMode));
-  window.presenceAPI.saveConfig(profileStore);
+}
+
+function loadProfile(index) {
+  if (!profileStore) return;
+  updateCurrentProfile();
+  activeProfile = index;
+  profileStore.activeProfile = index;
+  showActiveProfile();
+  flushProfiles();
+}
+
+// Replaces everything on screen with a store that came from the main process
+// (startup or an import).
+function applyStore(store) {
+  clearTimeout(saveTimeout);
+  saveTimeout = undefined;
+  profileStore = store;
+  activeProfile = store.activeProfile;
+  renderGlobalSettings(store.settings);
+  renderStartupStatus(store.startupStatus);
+  showActiveProfile();
+  renderMusicSources();
 }
 
 function display(value, fallback) {
@@ -181,8 +229,8 @@ function normalizeUrl(value) {
 
 function getButtonError(config) {
   const pairs = [
-    [config.button1Label.trim(), config.button1Url.trim(), "Botao 1"],
-    [config.button2Label.trim(), config.button2Url.trim(), "Botao 2"]
+    [config.button1Label.trim(), config.button1Url.trim(), "Botão 1"],
+    [config.button2Label.trim(), config.button2Url.trim(), "Botão 2"]
   ];
 
   for (const [label, url, name] of pairs) {
@@ -191,7 +239,7 @@ function getButtonError(config) {
       try {
         new URL(normalizeUrl(url));
       } catch {
-        return `${name}: informe uma URL valida.`;
+        return `${name}: informe uma URL válida.`;
       }
     }
   }
@@ -222,7 +270,7 @@ function renderMusicSources() {
   }
 
   // Skip identical re-renders so a button never disappears mid-click.
-  const signature = JSON.stringify(rows);
+  const signature = JSON.stringify([rows, Boolean(musicState?.watching)]);
   if (renderMusicSources.signature === signature) return;
   renderMusicSources.signature = signature;
 
@@ -230,8 +278,8 @@ function renderMusicSources() {
     const empty = document.createElement("p");
     empty.className = "music-sources-empty";
     empty.textContent = musicState?.watching
-      ? "Nenhuma midia detectada agora. De o play em algo para a fonte aparecer aqui."
-      : "Ative o modo de midia para detectar as fontes.";
+      ? "Nenhuma mídia detectada agora. Dê play em algo para a fonte aparecer aqui."
+      : "Ative o modo de mídia para detectar as fontes.";
     container.replaceChildren(empty);
     return;
   }
@@ -245,7 +293,7 @@ function renderMusicSources() {
     name.textContent = sourceLabel(row.app);
     const detail = document.createElement("span");
     detail.textContent = !row.detected
-      ? "Bloqueada (sem midia agora)"
+      ? "Bloqueada (sem mídia agora)"
       : row.ignored
         ? "Bloqueada"
         : `${row.playing ? "Tocando" : "Em pausa"}${row.title ? ` - ${row.title}` : ""}`;
@@ -272,7 +320,7 @@ async function toggleIgnoredSource(app, ignore) {
   renderMusicSources.signature = undefined;
   await saveGlobalSettings();
   showToast(ignore
-    ? `${sourceLabel(app)} bloqueado no modo de midia.`
+    ? `${sourceLabel(app)} bloqueado no modo de mídia.`
     : `${sourceLabel(app)} desbloqueado.`);
 }
 
@@ -336,7 +384,7 @@ function renderPreview() {
   if (config.musicMode && musicState?.error) {
     hint.textContent = musicState.error;
   } else if (config.musicMode && !music) {
-    hint.textContent = "Sem midia em reproducao - mostrando a presence configurada.";
+    hint.textContent = "Sem mídia em reprodução - mostrando a presence configurada.";
   } else {
     hint.textContent = "";
   }
@@ -368,19 +416,21 @@ function renderPreviewButtons(config) {
   }));
 }
 
-function setStatus(status, message, startedAt) {
-  connected = status === "online";
+// "connected" comes from the main process: an error while the presence is
+// still live (a failed refresh, a media watcher issue) keeps it true.
+function setStatus({ status, message, startedAt, connected: isConnected }) {
+  connected = typeof isConnected === "boolean" ? isConnected : status === "online";
   if (connected && Number.isFinite(startedAt)) timerStartedAt = startedAt;
   statusPill.className = `connection-pill ${status}`;
   statusText.textContent = message;
   connectButton.querySelector("span").textContent = connected ? "Atualizar presence" : "Ativar presence";
 }
 
-function showToast(message) {
+function showToast(message, duration = 2800) {
   toast.textContent = message;
   toast.classList.add("visible");
   clearTimeout(showToast.timeout);
-  showToast.timeout = setTimeout(() => toast.classList.remove("visible"), 2800);
+  showToast.timeout = setTimeout(() => toast.classList.remove("visible"), duration);
 }
 
 function cleanReleaseText(value) {
@@ -468,26 +518,63 @@ async function submitPresence() {
 
   const wasConnected = connected;
   connectButton.disabled = true;
-  await saveProfiles();
-  const result = await window.presenceAPI.connect(config);
-  connectButton.disabled = false;
-  if (!result.ok) showToast(result.error || "Nao foi possivel ativar a presence.");
-  else {
-    showToast(wasConnected ? "Presence atualizada." : "Presence ativada.");
+  try {
+    await flushProfiles();
+    const result = await window.presenceAPI.connect(config);
+    if (!result?.ok) showToast(result?.error || "Não foi possível ativar a presence.", 4500);
+    else showToast(wasConnected ? "Presence atualizada." : "Presence ativada.");
+  } catch (error) {
+    showToast(error?.message || "Não foi possível ativar a presence.", 4500);
+  } finally {
+    connectButton.disabled = false;
+  }
+}
+
+async function exportProfiles() {
+  if (!profileStore) return;
+  exportProfilesButton.disabled = true;
+  try {
+    await flushProfiles();
+    const result = await window.presenceAPI.exportProfiles();
+    if (result?.ok) showToast("Perfis exportados.");
+    else if (!result?.canceled) showToast(result?.error || "Não foi possível exportar os perfis.", 4500);
+  } catch (error) {
+    showToast(error?.message || "Não foi possível exportar os perfis.", 4500);
+  } finally {
+    exportProfilesButton.disabled = false;
+  }
+}
+
+async function importProfiles() {
+  if (!profileStore) return;
+  importProfilesButton.disabled = true;
+  try {
+    await flushProfiles();
+    const result = await window.presenceAPI.importProfiles();
+    if (result?.ok) {
+      applyStore(result.store);
+      showToast(result.count === 1 ? "1 perfil importado." : `${result.count} perfis importados.`);
+    } else if (!result?.canceled) {
+      showToast(result?.error || "Não foi possível importar os perfis.", 4500);
+    }
+  } catch (error) {
+    showToast(error?.message || "Não foi possível importar os perfis.", 4500);
+  } finally {
+    importProfilesButton.disabled = false;
   }
 }
 
 function handleConfigInput(event) {
-  if (!(event.target instanceof HTMLInputElement)) return;
+  // Only named inputs belong to the profile; global toggles save themselves.
+  if (!(event.target instanceof HTMLInputElement) || !event.target.name) return;
   renderPreview();
   if (event.target.name === "clientId") scheduleApplicationLookup(event.target.value);
   if (event.target.name === "musicMode") {
     window.presenceAPI.watchMusic(event.target.checked);
-    if (connected) showToast("Clique em Atualizar presence para aplicar a mudanca.");
+    if (connected) showToast("Clique em Atualizar presence para aplicar a mudança.");
   }
   updateCurrentProfile();
-  clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(saveProfiles, 350);
+  scheduleSave();
 }
 
 form.addEventListener("input", handleConfigInput);
@@ -505,28 +592,41 @@ editorTabs.forEach((button) => {
 profileName.addEventListener("input", () => {
   updateCurrentProfile();
   renderProfiles();
-  clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(saveProfiles, 350);
+  scheduleSave();
 });
 
 startWithWindows.addEventListener("change", async () => {
   const status = await saveGlobalSettings();
   if (!status?.ok) {
-    showToast(status?.error || "Nao foi possivel configurar a inicializacao.");
+    showToast(status?.error || "Não foi possível configurar a inicialização.", 4500);
     return;
   }
   showToast(status.development
-    ? "Preferencia salva para a versao compilada."
+    ? "Preferência salva para a versão compilada."
     : startWithWindows.checked
-      ? "Inicializacao protegida configurada."
-      : "Inicializacao com o Windows desativada.");
+      ? "Inicialização protegida configurada."
+      : "Inicialização com o Windows desativada.");
 });
 
 autoStartPresence.addEventListener("change", async () => {
   await saveGlobalSettings();
   showToast(autoStartPresence.checked
-    ? "Autoativacao preparada para a proxima abertura."
-    : "Autoativacao desativada.");
+    ? "Autoativação preparada para a próxima abertura."
+    : "Autoativação desativada.");
+});
+
+autoReconnect.addEventListener("change", async () => {
+  await saveGlobalSettings();
+  showToast(autoReconnect.checked
+    ? "Reconexão automática ativada."
+    : "Reconexão automática desativada.");
+});
+
+musicCoverLookup.addEventListener("change", async () => {
+  await saveGlobalSettings();
+  showToast(musicCoverLookup.checked
+    ? "A capa do álbum será buscada no iTunes."
+    : "Busca de capa desativada. Nada é enviado ao iTunes.");
 });
 
 profileTabs.forEach((button) => {
@@ -538,12 +638,14 @@ profileTabs.forEach((button) => {
   });
 });
 
+importProfilesButton.addEventListener("click", importProfiles);
+exportProfilesButton.addEventListener("click", exportProfiles);
 connectButton.addEventListener("click", submitPresence);
 
 document.querySelector("#previewButtons").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-url]");
   if (!button?.dataset.url) return;
-  window.presenceAPI.openLink(button.dataset.url);
+  window.presenceAPI.openLink(button.dataset.url).catch(() => showToast("Link não permitido."));
 });
 
 disconnectButton.addEventListener("click", async () => {
@@ -558,7 +660,7 @@ document.querySelector("#resetButton").addEventListener("click", () => {
   });
   window.presenceAPI.watchMusic(false);
   renderPreview();
-  saveProfiles();
+  flushProfiles();
   showToast("Campos limpos.");
 });
 
@@ -582,7 +684,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && updateModal.classList.contains("visible")) closeUpdate();
 });
 
-window.presenceAPI.onStatus(({ status, message, startedAt }) => setStatus(status, message, startedAt));
+window.presenceAPI.onStatus(setStatus);
 window.presenceAPI.onMusicState((data) => {
   musicState = data;
   musicStateAt = Date.now();
@@ -608,18 +710,9 @@ setInterval(() => {
 }, 1000);
 
 window.presenceAPI.loadConfig().then((store) => {
-  profileStore = store;
-  activeProfile = store.activeProfile;
-  startWithWindows.checked = Boolean(store.settings?.startWithWindows);
-  autoStartPresence.checked = Boolean(store.settings?.autoStartPresence);
-  renderStartupStatus(store.startupStatus);
-  loadingProfile = true;
-  profileName.value = currentProfile().name;
-  setConfig(currentProfile().config);
-  loadingProfile = false;
-  renderProfiles();
-  renderPreview();
-  renderMusicSources();
-  scheduleApplicationLookup(currentProfile().config.clientId, true);
-  window.presenceAPI.watchMusic(Boolean(currentProfile().config.musicMode));
+  applyStore(store);
+  if (store.presenceStatus) setStatus(store.presenceStatus);
+  if (store.corruptedBackup) {
+    showToast("O arquivo de configuração estava corrompido e foi guardado como cópia. Os perfis voltaram ao padrão.", 8000);
+  }
 });

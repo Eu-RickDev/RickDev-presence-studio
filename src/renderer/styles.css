@@ -184,6 +184,17 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -0.045em; font-weight: 720; }
   box-shadow: 0 0 0 2px rgba(128, 107, 255, 0.08);
 }
 
+.profile-transfer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 13px;
+}
+
+.profile-transfer > span { color: #646672; font-size: 10px; line-height: 1.5; }
+.profile-transfer > div { display: flex; gap: 7px; flex-shrink: 0; }
+
 .startup-panel {
   margin-bottom: 24px;
   padding: 18px;
@@ -234,10 +245,8 @@ h1 { margin: 0; font-size: 31px; letter-spacing: -0.045em; font-weight: 720; }
   border-radius: 13px;
 }
 
-.music-panel > .toggle-row {
-  background: #0d0e14;
-  margin-bottom: 18px;
-}
+.music-options { display: grid; gap: 9px; margin-bottom: 18px; }
+.music-options .toggle-row { background: #0d0e14; }
 
 .music-panel-heading { margin-bottom: 14px; }
 .music-panel-heading .eyebrow { margin-bottom: 5px; }

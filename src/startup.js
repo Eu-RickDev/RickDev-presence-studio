@@ -76,7 +76,7 @@ function createStartupManager(app, options = {}) {
 
     const sourceStat = await fileSystem.stat(source);
     if (!sourceStat.isFile() || sourceStat.size === 0) {
-      throw new Error("O executavel portatil atual nao e valido.");
+      throw new Error("O executável portátil atual não é válido.");
     }
 
     let targetStat;
@@ -98,7 +98,7 @@ function createStartupManager(app, options = {}) {
       await fileSystem.copyFile(source, temporary);
       const copiedStat = await fileSystem.stat(temporary);
       if (copiedStat.size !== sourceStat.size) {
-        throw new Error("A copia gerenciada ficou incompleta.");
+        throw new Error("A cópia gerenciada ficou incompleta.");
       }
 
       await fileSystem.rm(target, { force: true });
@@ -108,7 +108,7 @@ function createStartupManager(app, options = {}) {
     } catch (error) {
       await fileSystem.rm(temporary, { force: true }).catch(() => {});
       if (["EBUSY", "EPERM", "EACCES"].includes(error.code)) {
-        throw new Error("A copia de inicializacao esta em uso. Encerre o Studio e abra esta versao novamente.");
+        throw new Error("A cópia de inicialização está em uso. Encerre o Studio e abra esta versão novamente.");
       }
       throw error;
     }
@@ -127,7 +127,7 @@ function createStartupManager(app, options = {}) {
     if (!enabled) return;
     const state = app.getLoginItemSettings({ path: target, args });
     if (!state.openAtLogin && !state.executableWillLaunchAtLogin) {
-      throw new Error("O Windows nao confirmou o registro de inicializacao.");
+      throw new Error("O Windows não confirmou o registro de inicialização.");
     }
   }
 
@@ -164,7 +164,7 @@ function createStartupManager(app, options = {}) {
       return {
         ok: false,
         active: false,
-        error: error.message || "Nao foi possivel configurar a inicializacao com o Windows."
+        error: error.message || "Não foi possível configurar a inicialização com o Windows."
       };
     }
   }
