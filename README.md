@@ -6,7 +6,7 @@
   **Crie, visualize e controle sua Discord Rich Presence em uma interface simples e personalizável.**
 
   <p>
-    <img src="https://img.shields.io/badge/versão-1.1.0-5865F2?style=for-the-badge" alt="Versão 1.1.0">
+    <img src="https://img.shields.io/badge/versão-1.1.1-5865F2?style=for-the-badge" alt="Versão 1.1.1">
     <img src="https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows" alt="Plataforma Windows">
     <img src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron 36">
   </p>
