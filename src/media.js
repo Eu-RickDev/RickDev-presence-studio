@@ -250,7 +250,7 @@ function createMediaWatcher(options = {}) {
     fastFailures = Date.now() - launchedAt < FAST_FAILURE_WINDOW_MS ? fastFailures + 1 : 1;
 
     if (fastFailures >= MAX_FAST_FAILURES) {
-      onError("Nao foi possivel iniciar a deteccao de midia neste sistema.");
+      onError("Não foi possível iniciar a detecção de mídia neste sistema.");
       return;
     }
 
@@ -262,7 +262,7 @@ function createMediaWatcher(options = {}) {
     if (stopped || child) return;
 
     if (platform !== "win32") {
-      onError("A deteccao de midia esta disponivel apenas no Windows.");
+      onError("A detecção de mídia está disponível apenas no Windows.");
       return;
     }
 
@@ -331,5 +331,6 @@ module.exports = {
   normalizeMediaPayload,
   normalizeMediaState,
   parseMediaLine,
+  presenceText,
   selectMediaSession
 };

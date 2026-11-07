@@ -3,9 +3,10 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("presenceAPI", {
   loadConfig: () => ipcRenderer.invoke("config:load"),
   saveConfig: (config) => ipcRenderer.invoke("config:save", config),
+  exportProfiles: () => ipcRenderer.invoke("profiles:export"),
+  importProfiles: () => ipcRenderer.invoke("profiles:import"),
   lookupApplication: (clientId) => ipcRenderer.invoke("application:lookup", clientId),
   connect: (config) => ipcRenderer.invoke("presence:connect", config),
-  update: (config) => ipcRenderer.invoke("presence:update", config),
   disconnect: () => ipcRenderer.invoke("presence:disconnect"),
   openLink: (url) => ipcRenderer.invoke("link:open", url),
   watchMusic: (enabled) => ipcRenderer.invoke("music:watch", enabled),
