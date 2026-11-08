@@ -1,6 +1,6 @@
 const form = document.querySelector("#presenceForm");
 const mediaTab = document.querySelector("#tabMedia");
-const fields = [...document.querySelectorAll("#presenceForm input, #tabMedia input[name]")];
+const fields = [...document.querySelectorAll("#presenceForm input[name], #presenceForm select[name], #tabMedia input[name]")];
 const statusPill = document.querySelector("#statusPill");
 const statusText = document.querySelector("#statusText");
 const connectButton = document.querySelector("#connectButton");
@@ -13,13 +13,23 @@ const startWithWindows = document.querySelector("#startWithWindows");
 const autoStartPresence = document.querySelector("#autoStartPresence");
 const autoReconnect = document.querySelector("#autoReconnect");
 const musicCoverLookup = document.querySelector("#musicCoverLookup");
+const awayAction = document.querySelector("#awayAction");
+const awayMinutes = document.querySelector("#awayMinutes");
+const rotationFields = document.querySelector("#rotationFields");
 const startupStatus = document.querySelector("#startupStatus");
+const settingsButton = document.querySelector("#settingsButton");
+const settingsModal = document.querySelector("#settingsModal");
 const updateModal = document.querySelector("#updateModal");
 const updateTitle = document.querySelector("#updateTitle");
 const updateVersion = document.querySelector("#updateVersion");
 const updateNotes = document.querySelector("#updateNotes");
 const toast = document.querySelector("#toast");
+const appVersion = document.querySelector("#appVersion");
+const ACTIVITY_LABELS = { playing: "JOGANDO", listening: "OUVINDO", watching: "ASSISTINDO", competing: "COMPETINDO EM" };
+const ROTATION_SLOTS = [2, 3, 4];
 let saveTimeout;
+let previewVariant = 0;
+let previewVariantAt = Date.now();
 let timerStartedAt = Date.now();
 let connected = false;
 let profileStore;
@@ -63,6 +73,8 @@ function renderProfiles() {
     button.textContent = profileStore.profiles[index].name;
     button.classList.toggle("active", index === activeProfile);
     button.title = profileStore.profiles[index].name;
+    const option = awayAction.querySelector(`option[value="profile-${index}"]`);
+    if (option) option.textContent = `Mostrar o perfil ${profileStore.profiles[index].name}`;
   });
 }
 
@@ -95,6 +107,9 @@ function renderGlobalSettings(settings = {}) {
   autoStartPresence.checked = Boolean(settings.autoStartPresence);
   autoReconnect.checked = settings.autoReconnect !== false;
   musicCoverLookup.checked = settings.musicCoverLookup !== false;
+  awayAction.value = settings.awayAction || "off";
+  awayMinutes.value = String(settings.awayMinutes || 10);
+  awayMinutes.disabled = awayAction.value === "off";
 }
 
 async function saveGlobalSettings() {
@@ -104,7 +119,9 @@ async function saveGlobalSettings() {
     autoStartPresence: autoStartPresence.checked,
     autoReconnect: autoReconnect.checked,
     musicCoverLookup: musicCoverLookup.checked,
-    musicIgnoredApps: profileStore.settings?.musicIgnoredApps || []
+    musicIgnoredApps: profileStore.settings?.musicIgnoredApps || [],
+    awayAction: awayAction.value,
+    awayMinutes: Number(awayMinutes.value)
   };
   clearTimeout(saveTimeout);
   saveTimeout = undefined;
@@ -118,6 +135,7 @@ async function saveGlobalSettings() {
 function renderStartupStatus(status) {
   startupStatus.className = "startup-status";
   startupStatus.textContent = "";
+  settingsButton.classList.toggle("attention", Boolean(status && !status.ok));
   if (!status) return;
 
   if (!status.ok) {
@@ -225,6 +243,58 @@ function normalizeUrl(value) {
   const trimmed = value.trim();
   if (!trimmed) return "";
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function getImageError(config) {
+  for (const [value, name] of [[config.largeImageKey, "Imagem grande"], [config.smallImageKey, "Imagem pequena"]]) {
+    const image = value.trim();
+    if (!/^https?:\/\//i.test(image)) continue;
+    try {
+      if (new URL(image).protocol !== "https:") return `${name}: o link da imagem precisa começar com https://.`;
+    } catch {
+      return `${name}: informe um link de imagem válido.`;
+    }
+  }
+  return "";
+}
+
+function previewImage(key, application) {
+  const value = key.trim();
+  if (!value) return "";
+  return /^https:\/\//i.test(value) ? value : application?.assets?.[value] || "";
+}
+
+function previewVariants(config) {
+  const variants = [{ details: config.details, state: config.state, slot: 1 }];
+  if (!config.rotateTexts) return variants;
+
+  for (const slot of ROTATION_SLOTS) {
+    const details = config[`details${slot}`] || "";
+    const state = config[`state${slot}`] || "";
+    if (details.trim() || state.trim()) variants.push({ details, state, slot });
+  }
+  return variants;
+}
+
+function followPreviewVariant(field) {
+  const match = /^(?:details|state)(\d)?$/.exec(field?.name || "");
+  if (!match) return;
+  const slot = Number(match[1] || 1);
+  const index = previewVariants(getConfig()).findIndex((variant) => variant.slot === slot);
+  if (index < 0) return;
+  previewVariant = index;
+  previewVariantAt = Date.now();
+}
+
+function advancePreviewVariant() {
+  const config = getConfig();
+  const count = previewVariants(config).length;
+  if (count < 2) return;
+  const intervalMs = (Number(config.rotationInterval) || 30) * 1000;
+  if (Date.now() - previewVariantAt < intervalMs) return;
+  previewVariant = (previewVariant + 1) % count;
+  previewVariantAt = Date.now();
+  renderPreview();
 }
 
 function getButtonError(config) {
@@ -357,22 +427,33 @@ function renderPreview() {
   const music = currentMusic(config);
   const musicPaused = Boolean(music && musicState.presentation.paused);
   const largeImageUrl = music?.artUrl
-    || matchingApplication?.assets?.[config.largeImageKey.trim()]
+    || previewImage(config.largeImageKey, matchingApplication)
     || (!config.largeImageKey.trim() ? matchingApplication?.iconUrl : "");
-  const smallImageUrl = matchingApplication?.assets?.[config.smallImageKey.trim()] || "";
+  const smallImageUrl = previewImage(config.smallImageKey, matchingApplication);
+  const variants = previewVariants(config);
+  if (previewVariant >= variants.length) previewVariant = 0;
+  const text = variants[previewVariant];
+  const largeKeyIsLink = /^https?:\/\//i.test(config.largeImageKey.trim());
 
-  document.querySelector("#previewMode").textContent = music ? "OUVINDO" : "JOGANDO";
+  rotationFields.hidden = !config.rotateTexts;
+  document.querySelector("#previewMode").textContent = music
+    ? "OUVINDO"
+    : ACTIVITY_LABELS[config.activityType] || "JOGANDO";
   document.querySelector("#previewApp").textContent = matchingApplication?.name
     || (config.clientId ? `App ${config.clientId.slice(0, 8)}` : "Seu aplicativo");
   document.querySelector("#previewDetails").textContent = music
     ? music.title
-    : display(config.details, "Sem detalhes");
+    : display(text.details, "Sem detalhes");
   document.querySelector("#previewState").textContent = music
     ? (musicPaused ? (music.artist ? `Em pausa - ${music.artist}` : "Em pausa") : music.artist)
-    : display(config.state, "Sem estado");
+    : display(text.state, "Sem estado");
+  const intervalOption = document.querySelector('select[name="rotationInterval"]').selectedOptions[0];
+  document.querySelector("#previewRotation").textContent = !music && variants.length > 1
+    ? `Texto ${previewVariant + 1} de ${variants.length} · troca a cada ${intervalOption?.textContent || "30 segundos"}`
+    : "";
   document.querySelector("#largeAssetFallback").textContent = music
     ? music.title.slice(0, 1).toUpperCase()
-    : config.largeImageKey
+    : config.largeImageKey && !largeKeyIsLink
       ? config.largeImageKey.slice(0, 2).toUpperCase()
       : matchingApplication?.name?.slice(0, 1).toUpperCase() || "R";
   setPreviewImage("#largeAsset", "#largeAssetImage", largeImageUrl, "Imagem grande da presence");
@@ -418,12 +499,24 @@ function renderPreviewButtons(config) {
 
 // "connected" comes from the main process: an error while the presence is
 // still live (a failed refresh, a media watcher issue) keeps it true.
-function setStatus({ status, message, startedAt, connected: isConnected }) {
+function syncPreviewVariant(text) {
+  if (!text || /^(?:details|state)\d?$/.test(document.activeElement?.name || "")) return;
+  const index = previewVariants(getConfig()).findIndex((variant) => variant.slot === text.slot);
+  if (index < 0) return;
+  const since = Number.isFinite(text.since) ? text.since : Date.now();
+  if (index === previewVariant && since === previewVariantAt) return;
+  previewVariant = index;
+  previewVariantAt = since;
+  renderPreview();
+}
+
+function setStatus({ status, message, startedAt, connected: isConnected, text }) {
   connected = typeof isConnected === "boolean" ? isConnected : status === "online";
   if (connected && Number.isFinite(startedAt)) timerStartedAt = startedAt;
   statusPill.className = `connection-pill ${status}`;
   statusText.textContent = message;
   connectButton.querySelector("span").textContent = connected ? "Atualizar presence" : "Ativar presence";
+  if (connected) syncPreviewVariant(text);
 }
 
 function showToast(message, duration = 2800) {
@@ -490,16 +583,35 @@ function showUpdate(update) {
   updateTitle.textContent = update.name;
   updateVersion.textContent = `${update.currentVersion}  >  ${update.version}`;
   renderReleaseNotes(update.notes);
-  updateModal.classList.add("visible");
-  updateModal.setAttribute("aria-hidden", "false");
-  document.body.classList.add("update-open");
-  document.querySelector("#updateOpenButton").focus();
+  openModal(updateModal, document.querySelector("#updateOpenButton"));
 }
 
 function closeUpdate() {
-  updateModal.classList.remove("visible");
-  updateModal.setAttribute("aria-hidden", "true");
-  document.body.classList.remove("update-open");
+  closeModal(updateModal);
+}
+
+function openModal(modal, focusTarget) {
+  modal.classList.add("visible");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  focusTarget?.focus();
+}
+
+function closeModal(modal) {
+  modal.classList.remove("visible");
+  modal.setAttribute("aria-hidden", "true");
+  if (!document.querySelector(".modal-overlay.visible")) document.body.classList.remove("modal-open");
+}
+
+function openSettings() {
+  settingsButton.setAttribute("aria-expanded", "true");
+  openModal(settingsModal, document.querySelector("#settingsCloseButton"));
+}
+
+function closeSettings() {
+  closeModal(settingsModal);
+  settingsButton.setAttribute("aria-expanded", "false");
+  settingsButton.focus();
 }
 
 async function submitPresence() {
@@ -510,9 +622,9 @@ async function submitPresence() {
     return;
   }
 
-  const buttonError = getButtonError(config);
-  if (buttonError) {
-    showToast(buttonError);
+  const fieldError = getButtonError(config) || getImageError(config);
+  if (fieldError) {
+    showToast(fieldError);
     return;
   }
 
@@ -565,8 +677,10 @@ async function importProfiles() {
 }
 
 function handleConfigInput(event) {
-  // Only named inputs belong to the profile; global toggles save themselves.
-  if (!(event.target instanceof HTMLInputElement) || !event.target.name) return;
+  // Only named fields belong to the profile; global settings save themselves.
+  const isField = event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement;
+  if (!isField || !event.target.name) return;
+  followPreviewVariant(event.target);
   renderPreview();
   if (event.target.name === "clientId") scheduleApplicationLookup(event.target.value);
   if (event.target.name === "musicMode") {
@@ -579,6 +693,11 @@ function handleConfigInput(event) {
 
 form.addEventListener("input", handleConfigInput);
 mediaTab.addEventListener("input", handleConfigInput);
+form.addEventListener("focusin", (event) => {
+  const before = previewVariant;
+  followPreviewVariant(event.target);
+  if (previewVariant !== before) renderPreview();
+});
 
 const editorTabs = [...document.querySelectorAll("#editorTabs button")];
 editorTabs.forEach((button) => {
@@ -622,11 +741,24 @@ autoReconnect.addEventListener("change", async () => {
     : "Reconexão automática desativada.");
 });
 
+awayAction.addEventListener("change", async () => {
+  awayMinutes.disabled = awayAction.value === "off";
+  await saveGlobalSettings();
+  showToast(awayAction.value === "off"
+    ? "Nada muda quando você estiver ausente."
+    : `Após ${awayMinutes.selectedOptions[0].textContent} sem uso: ${awayAction.selectedOptions[0].textContent.toLowerCase()}.`);
+});
+
+awayMinutes.addEventListener("change", async () => {
+  await saveGlobalSettings();
+  showToast(`Ausente após ${awayMinutes.selectedOptions[0].textContent} sem uso.`);
+});
+
 musicCoverLookup.addEventListener("change", async () => {
   await saveGlobalSettings();
   showToast(musicCoverLookup.checked
-    ? "A capa do álbum será buscada no iTunes."
-    : "Busca de capa desativada. Nada é enviado ao iTunes.");
+    ? "A capa e o álbum serão buscados no iTunes e no Deezer."
+    : "Busca de capa desativada. Nada é enviado ao iTunes nem ao Deezer.");
 });
 
 profileTabs.forEach((button) => {
@@ -656,8 +788,11 @@ disconnectButton.addEventListener("click", async () => {
 document.querySelector("#resetButton").addEventListener("click", () => {
   fields.forEach((field) => {
     if (field.type === "checkbox") field.checked = field.name === "showTimer";
-    else if (field.name !== "clientId") field.value = "";
+    else if (field instanceof HTMLSelectElement) {
+      field.value = [...field.options].find((option) => option.defaultSelected)?.value ?? field.options[0].value;
+    } else if (field.name !== "clientId") field.value = "";
   });
+  previewVariant = 0;
   window.presenceAPI.watchMusic(false);
   renderPreview();
   flushProfiles();
@@ -680,11 +815,24 @@ updateModal.addEventListener("click", (event) => {
   if (event.target === updateModal) closeUpdate();
 });
 
+settingsButton.addEventListener("click", openSettings);
+document.querySelector("#settingsCloseButton").addEventListener("click", closeSettings);
+settingsModal.addEventListener("click", (event) => {
+  if (event.target === settingsModal) closeSettings();
+});
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && updateModal.classList.contains("visible")) closeUpdate();
+  if (event.key !== "Escape") return;
+  if (updateModal.classList.contains("visible")) closeUpdate();
+  else if (settingsModal.classList.contains("visible")) closeSettings();
 });
 
 window.presenceAPI.onStatus(setStatus);
+window.presenceAPI.onProfileSelected((index) => {
+  if (!profileStore?.profiles[index] || index === activeProfile) return;
+  loadProfile(index);
+  showToast(`${currentProfile().name} ativado pela bandeja.`);
+});
 window.presenceAPI.onMusicState((data) => {
   musicState = data;
   musicStateAt = Date.now();
@@ -707,10 +855,15 @@ setInterval(() => {
   document.querySelector("#previewTimer").textContent =
     `${hours ? `${String(hours).padStart(2, "0")}:` : ""}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")} decorrido`;
   renderMusicProgress();
+  advancePreviewVariant();
 }, 1000);
 
 window.presenceAPI.loadConfig().then((store) => {
   applyStore(store);
+  if (store.appVersion) {
+    appVersion.textContent = `v${store.appVersion}`;
+    appVersion.hidden = false;
+  }
   if (store.presenceStatus) setStatus(store.presenceStatus);
   if (store.corruptedBackup) {
     showToast("O arquivo de configuração estava corrompido e foi guardado como cópia. Os perfis voltaram ao padrão.", 8000);

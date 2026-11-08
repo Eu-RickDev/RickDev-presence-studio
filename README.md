@@ -6,7 +6,7 @@
   **Crie, visualize e controle sua Discord Rich Presence em uma interface simples e personalizável.**
 
   <p>
-    <img src="https://img.shields.io/badge/versão-1.1.1-5865F2?style=for-the-badge" alt="Versão 1.1.1">
+    <img src="https://img.shields.io/badge/versão-1.2.0-5865F2?style=for-the-badge" alt="Versão 1.2.0">
     <img src="https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows" alt="Plataforma Windows">
     <img src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron 36">
   </p>
@@ -25,17 +25,19 @@ Você pode definir textos, imagens, botões e tempo decorrido, acompanhar o resu
 - Interface moderna com pré-visualização em tempo real;
 - cinco perfis independentes, personalizáveis e salvos automaticamente;
 - importação e exportação de perfis em arquivo JSON, para backup ou para usar em outro computador;
-- textos de detalhes e estado da atividade;
-- imagem grande e imagem pequena com textos ao passar o mouse;
+- tipo de atividade: Jogando, Ouvindo, Assistindo ou Competindo em;
+- textos de detalhes e estado da atividade, com até quatro variações que se alternam sozinhas;
+- imagem grande e imagem pequena, por chave de asset ou por link https, com textos ao passar o mouse;
 - até dois botões com links externos;
 - cronômetro opcional de tempo decorrido;
 - modo de mídia: mostra a mídia em reprodução no Windows como atividade "Ouvindo", com barra de progresso, capa do álbum (opcional) e bloqueio por fonte;
 - modo de alta prioridade com reaplicação automática e preservação do tempo decorrido;
+- modo ausente: oculta a presence ou mostra outro perfil quando você se afasta do computador;
 - inicialização minimizada com o Windows e ativação automática resiliente;
 - reconexão automática quando o Discord fecha ou reinicia, mantendo o tempo decorrido;
 - aviso de novas versões com notas da release publicadas no GitHub;
 - conexão, atualização e desconexão da presence pela interface;
-- funcionamento em segundo plano pela bandeja do sistema;
+- funcionamento em segundo plano pela bandeja do sistema, com troca de perfil direto pelo menu do ícone;
 - executável portátil para Windows, sem instalação.
 
 ## Primeiros passos
@@ -51,15 +53,16 @@ Você pode definir textos, imagens, botões e tempo decorrido, acompanhar o resu
 
 ### 2. Adicione imagens
 
-Para usar imagens personalizadas, abra seu aplicativo no Developer Portal e envie os arquivos na área de **Rich Presence Assets**.
+Há duas formas de usar imagens personalizadas:
 
-Depois, informe no Studio exatamente a chave definida para cada imagem:
+- **Assets do Developer Portal:** abra seu aplicativo no Developer Portal, envie os arquivos na área de **Rich Presence Assets** e informe no Studio exatamente a chave definida para cada imagem. Elas podem levar alguns minutos para aparecer após o envio;
+- **Link da imagem:** cole o endereço direto de uma imagem hospedada na internet, começando com `https://` (por exemplo, um link terminado em `.png`, `.jpg`, `.gif` ou `.webp`). Não é preciso enviar nada ao Developer Portal, e a pré-visualização mostra a imagem na hora.
 
-- **Chave da imagem grande:** imagem principal da atividade;
-- **Chave da imagem pequena:** selo exibido sobre a imagem principal;
+Os campos são:
+
+- **Imagem grande:** imagem principal da atividade;
+- **Imagem pequena:** selo exibido sobre a imagem principal;
 - **Texto da imagem:** mensagem mostrada ao passar o mouse.
-
-As imagens podem levar alguns minutos para aparecer após o envio.
 
 ### 3. Ative sua presence
 
@@ -70,13 +73,39 @@ As imagens podem levar alguns minutos para aparecer após o envio.
 
 Após a conexão, você pode editar os campos e clicar em **Atualizar presence** para publicar as alterações.
 
+## Tipo de atividade
+
+O campo **Tipo de atividade** define o verbo que o Discord mostra antes do nome do aplicativo: **Jogando**, **Ouvindo**, **Assistindo** ou **Competindo em**. A pré-visualização acompanha a escolha. Se a versão do Discord não aceitar o tipo escolhido, a presence continua no ar como **Jogando**.
+
+O modo de mídia sempre usa **Ouvindo** enquanto uma mídia toca; o tipo escolhido vale para a presence configurada do perfil.
+
+## Textos que se alternam
+
+Ligue **Alternar textos**, na seção **Textos**, para revezar os detalhes e o estado entre até quatro variações: a principal e mais três. Variações totalmente vazias são ignoradas, e o campo **Trocar a cada** define o intervalo, de 15 segundos a 5 minutos.
+
+- A pré-visualização mostra qual texto está no ar (por exemplo, *Texto 2 de 3*) e pula para a variação que você estiver editando;
+- o tempo decorrido não reinicia a cada troca;
+- com o modo de mídia ligado, a troca só acontece enquanto a presence configurada estiver visível, sem interromper a música.
+
+## Modo ausente
+
+Nas **Preferências** (ícone de engrenagem), a seção **Ausente** decide o que acontece quando você se afasta do computador. Conta como ausente ficar sem usar o mouse e o teclado pelo tempo escolhido (de 5 minutos a 1 hora) ou bloquear a tela.
+
+| Opção | O que acontece |
+| --- | --- |
+| Não mudar nada | A presence continua igual (padrão) |
+| Ocultar a presence | A atividade some do Discord, mas a conexão continua aberta |
+| Mostrar o perfil… | A presence passa a mostrar outro perfil, como um perfil "Ausente". Se ele não tiver Application ID, usa o do perfil ativo |
+
+Ao voltar, a presence anterior é restaurada com o mesmo tempo decorrido. Enquanto o modo de mídia estiver mostrando uma mídia em reprodução, você não é considerado ausente. Clicar em **Atualizar presence** ou **Desconectar** encerra o estado de ausência na hora.
+
 ## Modo de mídia
 
 A aba **Modo de mídia** concentra tudo do recurso: o interruptor de ativação (por perfil), a busca de capa e as fontes detectadas. Com ele ligado, a presence mostra sua mídia em reprodução no momento; enquanto nenhuma mídia estiver em execução, retoma a presence configurada do perfil. Funciona com Spotify, navegadores e qualquer player que se integre aos controles de mídia do Windows.
 
 - A atividade aparece como **"Ouvindo"**, com título, artista e álbum da faixa;
 - a barra de progresso acompanha a posição real da mídia, inclusive ao avançar ou voltar;
-- a capa do álbum é buscada automaticamente no iTunes; sem resultado, a imagem grande do perfil é usada (veja [Capa do álbum](#capa-do-álbum));
+- a capa e o nome do álbum são buscados automaticamente no iTunes e, se ele não tiver a faixa, no Deezer; sem resultado, a imagem grande do perfil é usada (veja [Capa do álbum](#capa-do-álbum));
 - os botões e a imagem pequena configurados no perfil continuam visíveis;
 - ao pausar, a presence indica **"Em pausa"** e, após cerca de 30 segundos sem reprodução, volta sozinha para a presence configurada do perfil;
 - a pré-visualização mostra em tempo real a mídia detectada antes mesmo de ativar a presence;
@@ -84,7 +113,11 @@ A aba **Modo de mídia** concentra tudo do recurso: o interruptor de ativação 
 
 ### Capa do álbum
 
-Para encontrar a capa, o Studio envia o título e o artista da faixa para a busca pública do iTunes. Se preferir não enviar essas informações, desligue **Buscar capa do álbum** na aba **Modo de mídia**: a presence passa a usar a imagem grande configurada no perfil. A opção vale para todos os perfis e, se a presence estiver ativa, a capa sai do Discord na hora.
+Para encontrar a capa, o Studio envia o título e o artista da faixa para a busca pública do iTunes, na loja da região do Windows. Se o iTunes não tiver a faixa, a mesma busca é feita no Deezer. Um resultado só é usado quando o artista e o título conferem com o que está tocando, para evitar a capa de outra música. Quando o player não informa o álbum, como acontece com navegadores, o nome do álbum encontrado também aparece na presence.
+
+Títulos no formato do YouTube são limpos antes da busca: marcações como *(Clipe Oficial)* ou *[Áudio Oficial]* saem, canais terminados em *VEVO* ou *- Topic* viram o nome do artista e, em títulos como *Artista - Música*, o artista é lido do próprio título.
+
+Se preferir não enviar essas informações, desligue **Buscar capa do álbum** na aba **Modo de mídia**: a presence passa a usar a imagem grande configurada no perfil. A opção vale para todos os perfis e, se a presence estiver ativa, a capa e o álbum encontrados saem do Discord na hora.
 
 ### Fontes
 
@@ -103,6 +136,17 @@ O aplicativo possui cinco perfis independentes. Cada perfil guarda seu próprio 
 - todas as mudanças são salvas automaticamente no computador;
 - trocar de perfil não altera a presence ativa até você clicar em **Atualizar presence**.
 
+### Perfis na bandeja
+
+Clique com o botão direito no ícone do Studio na bandeja do Windows para trocar de perfil sem abrir a janela:
+
+- a primeira linha mostra o que está no Discord agora, como "Discord: Programação";
+- os cinco perfis aparecem pelo nome, com uma marca no que está ativo. Clicar em um deles aplica esse perfil na hora, como escolher a aba e clicar em **Atualizar presence**. Com a presence desligada, o clique já a ativa com esse perfil;
+- **Desativar presence** desliga a presence, e **Ativar presence** liga com o perfil selecionado na janela;
+- ao passar o mouse sobre o ícone, a dica mostra o perfil ativo e há quanto tempo ele está no ar.
+
+Se o perfil escolhido tiver algum problema, como Application ID vazio ou link de imagem inválido, uma notificação do Windows explica o motivo e a presence atual continua como está. Escolher um perfil pela bandeja durante o modo ausente encerra a ausência. A janela acompanha a troca e abre na aba do perfil escolhido.
+
 ### Importar e exportar perfis
 
 Use os botões abaixo das abas de perfis:
@@ -114,24 +158,30 @@ A importação valida o arquivo: campos desconhecidos são descartados, textos l
 
 ## Preferências
 
-O painel **Preferências**, na aba **Presence**, reúne as opções gerais do aplicativo:
+O ícone de engrenagem, no canto superior direito, abre as **Preferências**, com as opções gerais do aplicativo. Se a inicialização com o Windows não puder ser configurada, a engrenagem ganha um ponto vermelho e o motivo aparece dentro do painel.
 
 | Opção | O que faz |
 | --- | --- |
 | Iniciar com o Windows | Cria uma cópia gerenciada em `%LOCALAPPDATA%` e abre o Studio minimizado na bandeja ao entrar no Windows |
 | Ativar presence ao iniciar | Ativa o perfil selecionado quando o Studio abre; se o Discord ainda não estiver pronto, tenta de novo em intervalos crescentes (15 s, 30 s e depois a cada 60 s) |
 | Reconectar automaticamente | Se o Discord fechar ou reiniciar com a presence ativa, reconecta sozinho e reaplica a mesma presence, preservando o tempo decorrido. A primeira tentativa acontece após 5 s; enquanto o Discord estiver fechado, as tentativas seguem a cada 15 s, 30 s e depois 60 s. Clicar em **Desconectar** interrompe as tentativas. Ligada por padrão |
+| Quando estiver ausente | O que fazer quando você se afasta: nada, ocultar a presence ou mostrar outro perfil (veja [Modo ausente](#modo-ausente)) |
+| Considerar ausente após | Tempo sem usar o mouse e o teclado até contar como ausente: 5, 10, 15 ou 30 minutos, ou 1 hora |
 
 ## Campos disponíveis
 
 | Campo | Descrição | Limite ou formato |
 | --- | --- | --- |
 | Application ID | Identificador do aplicativo criado no Discord | 17 a 20 números |
+| Tipo de atividade | Verbo mostrado antes do nome do app | Jogando, Ouvindo, Assistindo ou Competindo em |
 | Detalhes | Texto principal da atividade | Até 128 caracteres |
 | Estado | Texto complementar da atividade | Até 128 caracteres |
-| Chave da imagem grande | Nome do asset principal no Developer Portal | Chave de um asset existente |
+| Alternar textos | Reveza detalhes e estado entre até quatro variações | Ligado ou desligado |
+| Detalhes e Estado 2 a 4 | Variações usadas quando os textos se alternam | Até 128 caracteres cada |
+| Trocar a cada | Intervalo entre as variações | 15 s, 30 s, 1 min, 2 min ou 5 min |
+| Imagem grande | Chave do asset principal ou link da imagem | Chave de um asset existente ou link `https://` |
 | Texto da imagem grande | Texto exibido ao passar o mouse | Até 128 caracteres |
-| Chave da imagem pequena | Nome do asset secundário no Developer Portal | Chave de um asset existente |
+| Imagem pequena | Chave do asset secundário ou link da imagem | Chave de um asset existente ou link `https://` |
 | Texto da imagem pequena | Texto exibido ao passar o mouse | Até 128 caracteres |
 | Botão 1 e Botão 2 | Texto dos botões da activity | Até 32 caracteres |
 | URL dos botões | Endereço aberto ao clicar no botão | URL válida |
@@ -149,7 +199,7 @@ Baixe o arquivo `RickDev Presence Studio.exe` na página de [Releases](https://g
 
 Se você gerou o executável localmente (veja abaixo), ele fica em `dist/RickDev Presence Studio.exe`.
 
-Ao fechar a janela, o aplicativo continua ativo na bandeja do sistema para manter a presence conectada. Para encerrá-lo completamente, clique com o botão direito no ícone da bandeja e selecione **Encerrar**.
+Ao fechar a janela, o aplicativo continua ativo na bandeja do sistema para manter a presence conectada. Pelo mesmo ícone dá para trocar de perfil ou desativar a presence (veja [Perfis na bandeja](#perfis-na-bandeja)). Para encerrá-lo completamente, clique com o botão direito no ícone da bandeja e selecione **Encerrar**.
 
 Ao habilitar **Iniciar com o Windows**, o Studio cria uma cópia gerenciada em `%LOCALAPPDATA%\RickDev Presence Studio`. O Windows usa essa cópia estável, portanto mover ou renomear o executável baixado não interrompe a inicialização automática. Para atualizar essa cópia, encerre a versão anterior pela bandeja e abra o novo executável; a substituição ocorre antes de o registro de inicialização ser renovado.
 
@@ -194,7 +244,10 @@ O arquivo gerado será salvo na pasta `dist`.
 │   ├── renderer/           # Interface, estilos e comportamento da tela
 │   ├── main.js             # Janela, bandeja, conexão com o Discord, reconexão e IPC
 │   ├── config.js           # Perfis e preferências: validação, gravação segura, importação e exportação
+│   ├── activity.js         # Montagem da atividade: tipo, textos alternados, imagens e botões
 │   ├── media.js            # Detecção de mídia do Windows e montagem da atividade "Ouvindo"
+│   ├── artwork.js          # Busca da capa e do álbum no iTunes e no Deezer
+│   ├── tray.js             # Menu e dica do ícone da bandeja
 │   ├── startup.js          # Inicialização com o Windows pela cópia gerenciada
 │   ├── version.js          # Comparação de versões para o aviso de atualização
 │   └── preload.js          # Comunicação segura entre interface e processo principal
@@ -223,7 +276,8 @@ Se o arquivo de configuração for corrompido (por exemplo, por um desligamento 
 
 - Confirme que as chaves informadas são exatamente iguais às cadastradas no Developer Portal;
 - aguarde alguns minutos após enviar novos assets;
-- verifique se os assets pertencem ao mesmo aplicativo do Application ID usado.
+- verifique se os assets pertencem ao mesmo aplicativo do Application ID usado;
+- se usar um link, ele precisa começar com `https://` e apontar direto para o arquivo da imagem, não para uma página que a exibe.
 
 ### Os botões não aparecem
 

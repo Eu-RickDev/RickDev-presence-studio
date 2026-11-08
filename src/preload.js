@@ -12,5 +12,6 @@ contextBridge.exposeInMainWorld("presenceAPI", {
   watchMusic: (enabled) => ipcRenderer.invoke("music:watch", enabled),
   onStatus: (callback) => ipcRenderer.on("presence:status", (_event, data) => callback(data)),
   onMusicState: (callback) => ipcRenderer.on("music:state", (_event, data) => callback(data)),
+  onProfileSelected: (callback) => ipcRenderer.on("profiles:selected", (_event, index) => callback(index)),
   onUpdateAvailable: (callback) => ipcRenderer.on("update:available", (_event, data) => callback(data))
 });
