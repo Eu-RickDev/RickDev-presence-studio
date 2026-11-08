@@ -6,19 +6,32 @@ const CONFIG_FILE = "presence-config.json";
 const EXPORT_FORMAT = "rickdev-presence-profiles";
 const EXPORT_FORMAT_VERSION = 1;
 const MAX_IMPORT_BYTES = 1024 * 1024;
+const AWAY_ACTIONS = ["off", "hide", ...Array.from({ length: PROFILE_COUNT }, (_item, index) => `profile-${index}`)];
+const AWAY_MINUTES = [5, 10, 15, 30, 60];
 
 const defaultSettings = {
   startWithWindows: false,
   autoStartPresence: false,
   autoReconnect: true,
   musicCoverLookup: true,
-  musicIgnoredApps: []
+  musicIgnoredApps: [],
+  awayAction: "off",
+  awayMinutes: 10
 };
 
 const defaults = {
   clientId: "",
+  activityType: "playing",
   details: "Criando algo incrível",
   state: "No RickDev Presence Studio",
+  rotateTexts: false,
+  rotationInterval: "30",
+  details2: "",
+  state2: "",
+  details3: "",
+  state3: "",
+  details4: "",
+  state4: "",
   largeImageKey: "",
   largeImageText: "",
   smallImageKey: "",
@@ -37,6 +50,12 @@ const textLimits = {
   clientId: 20,
   details: 128,
   state: 128,
+  details2: 128,
+  state2: 128,
+  details3: 128,
+  state3: 128,
+  details4: 128,
+  state4: 128,
   largeImageKey: 256,
   largeImageText: 128,
   smallImageKey: 256,
@@ -45,6 +64,11 @@ const textLimits = {
   button1Url: 512,
   button2Label: 32,
   button2Url: 512
+};
+
+const choiceFields = {
+  activityType: ["playing", "listening", "watching", "competing"],
+  rotationInterval: ["15", "30", "60", "120", "300"]
 };
 
 function emptyProfile(index) {
@@ -64,6 +88,8 @@ function normalizeConfig(raw) {
     const value = source[key];
     if (typeof fallback === "boolean") {
       config[key] = typeof value === "boolean" ? value : fallback;
+    } else if (choiceFields[key]) {
+      config[key] = choiceFields[key].includes(String(value)) ? String(value) : fallback;
     } else if (value === undefined) {
       config[key] = fallback;
     } else if (typeof value === "string" || typeof value === "number") {
@@ -97,7 +123,11 @@ function normalizeSettings(raw) {
       : defaultSettings.musicCoverLookup,
     musicIgnoredApps: [...new Set(rawIgnored
       .map((app) => String(app).trim().toLowerCase().slice(0, 128))
-      .filter(Boolean))].slice(0, 30)
+      .filter(Boolean))].slice(0, 30),
+    awayAction: AWAY_ACTIONS.includes(source.awayAction) ? source.awayAction : defaultSettings.awayAction,
+    awayMinutes: AWAY_MINUTES.includes(Number(source.awayMinutes))
+      ? Number(source.awayMinutes)
+      : defaultSettings.awayMinutes
   };
 }
 
