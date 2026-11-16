@@ -1,4 +1,5 @@
 const { presenceText } = require("./media");
+const { resolveText, timerTimestamps } = require("./renderer/presence-format");
 
 const MAX_UNIX_TIMESTAMP_MS = 2147483647000;
 const ACTIVITY_TYPES = Object.freeze({ playing: 0, listening: 2, watching: 3, competing: 5 });
@@ -85,8 +86,14 @@ function timestampMs(value) {
   return Number(value) || 0;
 }
 
+function validTimestamps(timestamps) {
+  if (!timestamps) return false;
+  return Object.values(timestamps).every((value) => value > 0 && value <= MAX_UNIX_TIMESTAMP_MS);
+}
+
 function buildActivity(config, options = {}) {
-  const { startTimestamp, variant = 0, includeType = true } = options;
+  const { startTimestamp, variant = 0, includeType = true, appIcon = "", context = {}, now = Date.now() } = options;
+  const textContext = { now, ...context };
   validateButtons(config);
   validateImage(config.largeImageKey, "Imagem grande");
   validateImage(config.smallImageKey, "Imagem pequena");
@@ -97,24 +104,24 @@ function buildActivity(config, options = {}) {
 
   const variants = textVariants(config);
   const text = variants[Math.abs(Math.trunc(variant)) % variants.length];
-  const details = presenceText(text.details);
+  const details = presenceText(resolveText(text.details, textContext));
   if (details) activity.details = details;
-  const state = presenceText(text.state);
+  const state = presenceText(resolveText(text.state, textContext));
   if (state) activity.state = state;
 
   const assets = {};
-  const largeImage = String(config.largeImageKey || "").trim();
+  const largeImage = String(config.largeImageKey || "").trim() || String(appIcon || "").slice(0, 256);
   if (largeImage) assets.large_image = largeImage;
-  const largeText = presenceText(config.largeImageText);
+  const largeText = presenceText(resolveText(config.largeImageText, textContext));
   if (largeText) assets.large_text = largeText;
   const smallImage = String(config.smallImageKey || "").trim();
   if (smallImage) assets.small_image = smallImage;
-  const smallText = presenceText(config.smallImageText);
+  const smallText = presenceText(resolveText(config.smallImageText, textContext));
   if (smallText) assets.small_text = smallText;
   if (Object.keys(assets).length) activity.assets = assets;
 
-  const start = timestampMs(startTimestamp);
-  if (config.showTimer && start > 0 && start <= MAX_UNIX_TIMESTAMP_MS) activity.timestamps = { start };
+  const timestamps = timerTimestamps(config, { startMs: timestampMs(startTimestamp), nowMs: now });
+  if (validTimestamps(timestamps)) activity.timestamps = timestamps;
 
   const buttons = buildButtons(config);
   if (buttons.length) activity.buttons = buttons;

@@ -1,0 +1,68 @@
+# Gera o executável portátil e anexa à release publicada, com o SHA-256 nas notas.
+# Se a release já tiver um .exe anexado, nada é refeito.
+name: Executável da release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag da release, como v1.3.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  executavel:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Conferir anexos da release
+        id: release
+        shell: pwsh
+        run: |
+          $names = gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
+          $hasExe = [bool]($names | Where-Object { $_ -like '*.exe' })
+          "pronta=$($hasExe.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/checkout@v5
+        if: steps.release.outputs.pronta != 'true'
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v5
+        if: steps.release.outputs.pronta != 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        if: steps.release.outputs.pronta != 'true'
+        run: npm ci
+
+      - name: Testes
+        if: steps.release.outputs.pronta != 'true' && hashFiles('test/**/*.test.js') != ''
+        run: npm test
+
+      - name: Gerar o executável
+        if: steps.release.outputs.pronta != 'true'
+        run: node scripts/build-portable.js --win portable --publish never
+
+      - name: Anexar à release
+        if: steps.release.outputs.pronta != 'true'
+        shell: pwsh
+        run: |
+          $exe = "dist/RickDev Presence Studio.exe"
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          gh release upload $env:TAG $exe --repo $env:GITHUB_REPOSITORY
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json body --jq .body | Out-File -FilePath notes.md -Encoding utf8NoBOM
+          $body = ([string](Get-Content -LiteralPath notes.md -Raw)).TrimEnd()
+          if ($body -notmatch $hash) {
+            Set-Content -LiteralPath notes.md -Value "$body`n`n**SHA-256:** ``$hash``" -Encoding utf8NoBOM
+            gh release edit $env:TAG --repo $env:GITHUB_REPOSITORY --notes-file notes.md
+          }
+          "SHA-256: $hash" >> $env:GITHUB_STEP_SUMMARY

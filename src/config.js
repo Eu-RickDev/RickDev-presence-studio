@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { normalizeAutomationRules } = require("./automation");
 
 const PROFILE_COUNT = 5;
 const CONFIG_FILE = "presence-config.json";
@@ -15,8 +16,10 @@ const defaultSettings = {
   autoReconnect: true,
   musicCoverLookup: true,
   musicIgnoredApps: [],
+  musicVideoApps: [],
   awayAction: "off",
-  awayMinutes: 10
+  awayMinutes: 10,
+  automationRules: []
 };
 
 const defaults = {
@@ -41,8 +44,14 @@ const defaults = {
   button2Label: "",
   button2Url: "",
   showTimer: true,
+  timerMode: "elapsed",
+  timerTime: "",
   highPriority: false,
-  musicMode: false
+  musicMode: false,
+  musicPlayerIcon: true,
+  musicAsPlaying: false,
+  musicPlayerName: false,
+  musicButton: "off"
 };
 
 // Upper bounds for stored text, matching what Discord accepts for each field.
@@ -63,12 +72,15 @@ const textLimits = {
   button1Label: 32,
   button1Url: 512,
   button2Label: 32,
-  button2Url: 512
+  button2Url: 512,
+  timerTime: 5
 };
 
 const choiceFields = {
   activityType: ["playing", "listening", "watching", "competing"],
-  rotationInterval: ["15", "30", "60", "120", "300"]
+  rotationInterval: ["15", "30", "60", "120", "300"],
+  timerMode: ["elapsed", "since", "until"],
+  musicButton: ["off", "auto", "youtube", "spotify", "deezer", "apple"]
 };
 
 function emptyProfile(index) {
@@ -102,6 +114,12 @@ function normalizeConfig(raw) {
   return config;
 }
 
+function appList(raw) {
+  return [...new Set((Array.isArray(raw) ? raw : [])
+    .map((app) => String(app).trim().toLowerCase().slice(0, 128))
+    .filter(Boolean))].slice(0, 30);
+}
+
 function normalizeSettings(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
   // A test build briefly stored per-type rules as an object; its keys count
@@ -121,13 +139,13 @@ function normalizeSettings(raw) {
     musicCoverLookup: typeof source.musicCoverLookup === "boolean"
       ? source.musicCoverLookup
       : defaultSettings.musicCoverLookup,
-    musicIgnoredApps: [...new Set(rawIgnored
-      .map((app) => String(app).trim().toLowerCase().slice(0, 128))
-      .filter(Boolean))].slice(0, 30),
+    musicIgnoredApps: appList(rawIgnored),
+    musicVideoApps: appList(source.musicVideoApps),
     awayAction: AWAY_ACTIONS.includes(source.awayAction) ? source.awayAction : defaultSettings.awayAction,
     awayMinutes: AWAY_MINUTES.includes(Number(source.awayMinutes))
       ? Number(source.awayMinutes)
-      : defaultSettings.awayMinutes
+      : defaultSettings.awayMinutes,
+    automationRules: normalizeAutomationRules(source.automationRules, PROFILE_COUNT)
   };
 }
 

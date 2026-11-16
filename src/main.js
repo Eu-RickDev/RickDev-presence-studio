@@ -24,10 +24,28 @@ const {
 const { EMPTY_TRACK_INFO, fetchTrackInfo } = require("./artwork");
 const { buildActivity, buildButtons, rotationIntervalMs, textVariants } = require("./activity");
 const { trayMenuTemplate, trayTooltip } = require("./tray");
+const { musicButton, playerInfo, usesMediaVariables } = require("./renderer/presence-format");
+const {
+  automationStep,
+  initialAutomationState,
+  listProcesses,
+  matchingRule,
+  needsProcessList
+} = require("./automation");
+const {
+  cleanupDownloads,
+  downloadUpdate,
+  expectedSha256,
+  launchUpdate,
+  pickReleaseAsset,
+  updateFileName
+} = require("./updater");
 
 // Discord only accepts a handful of activity updates per window (about five
 // every 20 seconds), so media updates are spaced out and coalesced.
 const MUSIC_UPDATE_SPACING_MS = 4000;
+const SPLASH_MIN_VISIBLE_MS = 600;
+const MAIN_WINDOW_FALLBACK_MS = 10000;
 const SEEK_REAPPLY_MIN_MS = 5000;
 const RPC_CLOSE_TIMEOUT_MS = 3000;
 const RECONNECT_FIRST_DELAY_MS = 5000;
@@ -36,13 +54,24 @@ const TRACK_LOOKUP_RETRY_MS = 60 * 1000;
 const TRACK_LOOKUP_MISS_MS = 30 * 60 * 1000;
 const AWAY_CHECK_INTERVAL_MS = 15 * 1000;
 const TRAY_REFRESH_INTERVAL_MS = 60 * 1000;
+const APP_ICON_TTL_MS = 60 * 60 * 1000;
+const APP_ICON_RETRY_MS = 5 * 60 * 1000;
+const APP_ICON_WAIT_MS = 1500;
+const APP_ICON_PREFIX = "https://cdn.discordapp.com/app-icons/";
+const DYNAMIC_CHECK_INTERVAL_MS = 10 * 1000;
+const DYNAMIC_REFRESH_SPACING_MS = 5000;
+const AUTOMATION_CHECK_INTERVAL_MS = 10 * 1000;
+const UPDATE_PROGRESS_SPACING_MS = 150;
 
 let mainWindow;
+let splashWindow;
+let splashShownAt = 0;
 let tray;
 let rpc;
 let activeClientId;
 let activeConfig;
 let activeStartTimestamp;
+let activeProfileName = "";
 let priorityInterval;
 let priorityUpdatePromise;
 let connectionQueue = Promise.resolve();
@@ -80,12 +109,24 @@ let awayState;
 let awayCheckRunning = false;
 let screenLocked = false;
 let musicArtSupported = true;
+let appIconSupported = true;
+let playerIconSupported = true;
+let activityNameSupported = true;
+let lastConfiguredActivity = "";
+let dynamicRefreshTimer;
+let lastDynamicRefreshAt = 0;
+let automation = initialAutomationState();
+let automationRunning = false;
+let availableUpdate;
+let updateInstalling = false;
+let launchedAfterUpdate = process.argv.includes("--updated");
 let liveProfile;
 let trayProfileNames = [];
 let trayMenuSignature = "";
 let trayTooltipText = "";
 const trackInfoCache = new Map();
 const applicationCache = new Map();
+const applicationIcons = new Map();
 const githubRepository = "Eu-RickDev/RickDev-presence-studio";
 
 let runtimeSettings = { ...defaultSettings };
@@ -167,6 +208,30 @@ async function lookupApplication(value) {
   return data;
 }
 
+function cachedApplicationIcon(clientId) {
+  if (!appIconSupported) return "";
+  return applicationIcons.get(String(clientId || "").trim())?.url || "";
+}
+
+async function resolveApplicationIcon(clientId) {
+  const id = String(clientId || "").trim();
+  const cached = applicationIcons.get(id);
+  if (cached && Date.now() - cached.at < (cached.url ? APP_ICON_TTL_MS : APP_ICON_RETRY_MS)) return cached.url;
+
+  let url = "";
+  try {
+    url = (await lookupApplication(id)).iconUrl || "";
+  } catch {
+    url = cached?.url || "";
+  }
+  applicationIcons.set(id, { url, at: Date.now() });
+  return url;
+}
+
+function isApplicationIcon(value) {
+  return String(value || "").startsWith(APP_ICON_PREFIX);
+}
+
 async function fetchLatestRelease() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
@@ -193,14 +258,22 @@ async function checkForUpdates() {
     const release = await fetchLatestRelease();
     if (!release || release.draft || compareVersions(app.getVersion(), release.tag_name) <= 0) return;
 
+    const version = String(release.tag_name || "").replace(/^v/i, "");
+    const asset = pickReleaseAsset(release);
+    const sha256 = expectedSha256(release, asset);
+    availableUpdate = asset && sha256
+      ? { version, url: asset.browser_download_url, size: Number(asset.size), sha256 }
+      : undefined;
+
     const update = {
       currentVersion: app.getVersion(),
-      version: String(release.tag_name || "").replace(/^v/i, ""),
+      version,
       name: release.name || `RickDev Presence Studio ${release.tag_name}`,
       notes: String(release.body || "Esta versão não possui notas de lançamento.").slice(0, 20000),
       url: /^https:\/\/github\.com\//i.test(release.html_url || "")
         ? release.html_url
-        : `https://github.com/${githubRepository}/releases/latest`
+        : `https://github.com/${githubRepository}/releases/latest`,
+      canInstall: Boolean(availableUpdate && updateInstallSupported())
     };
 
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -215,6 +288,56 @@ async function checkForUpdates() {
     }
   } catch {
     // Update checks must never block startup or affect Discord RPC.
+  }
+}
+
+// Only the packaged portable build knows which file to replace.
+function updateInstallSupported() {
+  return app.isPackaged && process.platform === "win32" && Boolean(process.env.PORTABLE_EXECUTABLE_FILE);
+}
+
+function updatesDirectory() {
+  return path.join(startupManager.directory(), "updates");
+}
+
+function sendUpdateProgress(progress) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update:progress", progress);
+}
+
+async function installUpdate() {
+  if (updateInstalling) return { ok: false, error: "A atualização já está sendo baixada." };
+  if (!availableUpdate || !updateInstallSupported()) {
+    return { ok: false, error: "Esta versão não pode ser atualizada por aqui. Baixe pelo GitHub." };
+  }
+
+  updateInstalling = true;
+  const update = availableUpdate;
+  let lastProgressAt = 0;
+  try {
+    const target = path.join(updatesDirectory(), updateFileName(update.version));
+    await downloadUpdate({
+      ...update,
+      target,
+      fetch: (url, init) => net.fetch(url, init),
+      onProgress: (progress) => {
+        const now = Date.now();
+        if (now - lastProgressAt < UPDATE_PROGRESS_SPACING_MS && progress.received < progress.total) return;
+        lastProgressAt = now;
+        sendUpdateProgress({ ...progress, stage: "download" });
+      }
+    });
+
+    sendUpdateProgress({ received: update.size, total: update.size, stage: "restart" });
+    launchUpdate({
+      source: target,
+      target: process.env.PORTABLE_EXECUTABLE_FILE,
+      resume: presenceConnected() || Boolean(awayState)
+    });
+    setTimeout(() => app.quit(), 400);
+    return { ok: true };
+  } catch (error) {
+    updateInstalling = false;
+    return { ok: false, error: error.message || "Não foi possível atualizar." };
   }
 }
 
@@ -242,7 +365,8 @@ function statusPayload() {
     ...lastStatus,
     connected,
     startedAt: connected ? activeStartTimestamp?.getTime() : undefined,
-    text: connected ? currentText() : undefined
+    text: connected ? currentText() : undefined,
+    liveProfile: connected ? liveProfile?.index : undefined
   };
 }
 
@@ -253,8 +377,28 @@ function sendStatus(status, message) {
   mainWindow.webContents.send("presence:status", statusPayload());
 }
 
-function configuredActivity(config = activeConfig, startTimestamp = activeStartTimestamp, variant = rotationIndex) {
-  return buildActivity(config, { startTimestamp, variant, includeType: activityTypeSupported });
+function playingMedia() {
+  return latestPresentation.mode === "music" && latestMedia?.active ? latestMedia : undefined;
+}
+
+function configuredActivity(
+  config = activeConfig,
+  startTimestamp = activeStartTimestamp,
+  variant = rotationIndex,
+  profileName = activeProfileName
+) {
+  return buildActivity(config, {
+    startTimestamp,
+    variant,
+    includeType: activityTypeSupported,
+    appIcon: cachedApplicationIcon(config.clientId),
+    context: { profileName, media: playingMedia() }
+  });
+}
+
+async function sendConfiguredActivity(activity = configuredActivity()) {
+  await sendActivity(activity);
+  lastConfiguredActivity = JSON.stringify(activity);
 }
 
 function presenceHidden() {
@@ -266,6 +410,9 @@ function activeStatusMessage() {
     return awayState.mode === "hide"
       ? "Ausente - presence oculta"
       : `Ausente - perfil ${awayState.profileName}`;
+  }
+  if (automation.applied !== undefined && liveProfile?.index === automation.applied) {
+    return `Automação: perfil ${activeProfileName || automation.applied + 1} ativo`;
   }
   if (activeConfig?.musicMode) return "Modo de mídia ativo - aguardando reprodução";
   return activeConfig?.highPriority ? "Presence ativa - alta prioridade" : "Presence ativa";
@@ -317,20 +464,32 @@ function trackLookupExtras(media, info) {
   };
 }
 
+function videoApps() {
+  return new Set((runtimeSettings.musicVideoApps || []).map((app) => app.toLowerCase()));
+}
+
+function trackLinks(info) {
+  return info.trackUrl && info.service ? { [info.service]: info.trackUrl } : {};
+}
+
 function broadcastMusicState(force = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
   const media = latestMedia?.active ? latestMedia : undefined;
-  const info = media && coverLookupAllowed() ? cachedTrackInfo(media) : EMPTY_TRACK_INFO;
+  const info = media && coverLookupAllowed() && !media.video ? cachedTrackInfo(media) : EMPTY_TRACK_INFO;
   const artUrl = info.artUrl;
   const album = media?.album || info.album;
 
   const ignoredApps = new Set((runtimeSettings.musicIgnoredApps || []).map((app) => app.toLowerCase()));
+  const markedVideo = videoApps();
   const sources = (lastMediaPayload?.sessions || []).map((session) => ({
     app: session.app,
+    player: session.player,
     title: session.title,
     playing: session.playing,
-    ignored: ignoredApps.has(session.app.toLowerCase())
+    ignored: ignoredApps.has(session.app.toLowerCase()),
+    video: markedVideo.has(session.app.toLowerCase()),
+    reportedVideo: session.video
   }));
 
   // The watcher ticks every 1.5s even when nothing changed; only wake the
@@ -338,8 +497,8 @@ function broadcastMusicState(force = false) {
   const now = Date.now();
   const signature = [
     Boolean(mediaWatcher), musicWatcherError, latestPresentation.mode, latestPresentation.paused,
-    media?.title, media?.artist, album, media?.playing, media?.durationMs, artUrl,
-    JSON.stringify(sources)
+    media?.title, media?.artist, album, media?.playing, media?.durationMs, artUrl, media?.video,
+    info.trackUrl, JSON.stringify(sources)
   ].join("|");
   let positionDrift = 0;
   if (media && lastBroadcastMusic && lastBroadcastMusic.signature === signature) {
@@ -354,19 +513,22 @@ function broadcastMusicState(force = false) {
     error: musicWatcherError,
     presentation: latestPresentation,
     sources,
-    media: media ? { ...media, album, artUrl } : undefined
+    media: media ? { ...media, album, artUrl, links: trackLinks(info) } : undefined
   });
 }
 
 function handleMediaState(payload) {
   lastMediaPayload = payload;
-  const state = selectMediaSession(payload, runtimeSettings.musicIgnoredApps);
+  const selected = selectMediaSession(payload, runtimeSettings.musicIgnoredApps);
+  const state = selected.active && !selected.video && videoApps().has(selected.app.toLowerCase())
+    ? { ...selected, video: true }
+    : selected;
   latestMedia = state;
   if (state.active && state.playing) lastPlayingAt = Date.now();
   latestPresentation = derivePresentation(state, lastPlayingAt);
   broadcastMusicState();
 
-  if (state.active && coverLookupAllowed()) {
+  if (state.active && coverLookupAllowed() && !state.video) {
     const key = trackArtKey(state);
     lookupTrackInfo(state).then((info) => {
       if (!coverLookupAllowed() || !latestMedia?.active || trackArtKey(latestMedia) !== key) return;
@@ -383,13 +545,15 @@ function handleMediaState(payload) {
   }
 
   maybeUpdateMusicPresence();
+  if (activeConfig && usesMediaVariables(activeConfig)) checkDynamicPresence();
 }
 
 function shouldWatchMedia() {
   // The preview-only leg stops when the window hides to the tray; the
   // connected leg keeps the watcher alive for the presence itself.
   const windowVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
-  return (rendererWatchingMusic && windowVisible) || Boolean(rpc && activeConfig?.musicMode);
+  return (rendererWatchingMusic && windowVisible)
+    || Boolean(rpc && activeConfig && (activeConfig.musicMode || usesMediaVariables(activeConfig)));
 }
 
 function syncMediaWatcher() {
@@ -432,10 +596,17 @@ function isActivityValidationError(error) {
 // degrade one feature at a time and remember what this session supports.
 // Discord's validation errors name the failing field, so blame the cover
 // first when the message points at the assets instead of burning the type.
-async function sendActivity(activity, artUrl = "", fallbackImage = "") {
+function withoutAsset(activity, ...keys) {
+  const next = { ...activity, assets: { ...activity.assets } };
+  for (const key of keys) delete next.assets[key];
+  if (!Object.keys(next.assets).length) delete next.assets;
+  return next;
+}
+
+async function sendActivity(activity, { artUrl = "", fallbackImage = "", playerIcon = "" } = {}) {
   let current = activity;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       await setRawActivity(current);
       return;
@@ -443,6 +614,21 @@ async function sendActivity(activity, artUrl = "", fallbackImage = "") {
       if (!isActivityValidationError(error)) throw error;
 
       const message = String(error?.message || error);
+      const carriesPlayerIcon = Boolean(playerIcon) && current.assets?.small_image === playerIcon;
+      if (carriesPlayerIcon && /small/i.test(message)) {
+        playerIconSupported = false;
+        current = withoutAsset(current, "small_image", "small_text");
+        continue;
+      }
+
+      if (isApplicationIcon(current.assets?.large_image) && /assets|image/i.test(message)) {
+        appIconSupported = false;
+        current = { ...current, assets: { ...current.assets } };
+        delete current.assets.large_image;
+        if (!Object.keys(current.assets).length) delete current.assets;
+        continue;
+      }
+
       const carriesArt = Boolean(artUrl) && current.assets?.large_image === artUrl;
       const blamesArt = carriesArt && /assets|image/i.test(message);
 
@@ -455,10 +641,23 @@ async function sendActivity(activity, artUrl = "", fallbackImage = "") {
         continue;
       }
 
+      if (current.name !== undefined && /\bname\b/i.test(message)) {
+        activityNameSupported = false;
+        current = { ...current };
+        delete current.name;
+        continue;
+      }
+
       if (current.type !== undefined && !/assets|image|button/i.test(message)) {
         activityTypeSupported = false;
         current = { ...current };
         delete current.type;
+        continue;
+      }
+
+      if (carriesPlayerIcon && /assets|image/i.test(message)) {
+        playerIconSupported = false;
+        current = withoutAsset(current, "small_image", "small_text");
         continue;
       }
 
@@ -474,7 +673,7 @@ async function applyMusicPresence(signature) {
   const presentation = latestPresentation;
 
   if (presentation.mode === "music" && media?.active) {
-    const info = coverLookupAllowed() ? await lookupTrackInfo(media) : EMPTY_TRACK_INFO;
+    const info = coverLookupAllowed() && !media.video ? await lookupTrackInfo(media) : EMPTY_TRACK_INFO;
     if (!rpc || !activeConfig?.musicMode) return;
 
     if (musicTrackKey !== trackArtKey(media)) {
@@ -483,16 +682,32 @@ async function applyMusicPresence(signature) {
     }
 
     const extras = trackLookupExtras(media, info);
+    const appIcon = cachedApplicationIcon(activeConfig.clientId);
+    const player = activeConfig.musicPlayerIcon && playerIconSupported ? playerInfo(media.player || media.app) : undefined;
+    const activityName = activeConfig.musicPlayerName && activityNameSupported
+      ? playerInfo(media.player || media.app)?.name || ""
+      : "";
+    const listenButton = media.video
+      ? undefined
+      : musicButton(activeConfig.musicButton, media, { app: media.player || media.app, links: trackLinks(info) });
     const activity = buildMusicActivity(activeConfig, { ...media, album: media.album || extras.album }, {
       paused: presentation.paused,
       artUrl: extras.artUrl,
-      buttons: buildButtons(activeConfig),
+      appIcon,
+      playerIcon: player,
+      activityName,
+      buttons: [listenButton, ...buildButtons(activeConfig)].filter(Boolean).slice(0, 2),
       includeType: activityTypeSupported,
+      context: { profileName: activeProfileName },
       now: Date.now(),
       fallbackStart: musicTrackStartedAt
     });
 
-    await sendActivity(activity, extras.artUrl, activeConfig.largeImageKey.trim());
+    await sendActivity(activity, {
+      artUrl: extras.artUrl,
+      fallbackImage: activeConfig.largeImageKey.trim() || appIcon,
+      playerIcon: player?.icon
+    });
     lastAppliedMusic = {
       signature,
       lookup: Boolean(extras.artUrl || extras.album),
@@ -507,7 +722,7 @@ async function applyMusicPresence(signature) {
   }
 
   if (!rpc || !activeConfig) return;
-  await sendActivity(configuredActivity());
+  await sendConfiguredActivity();
   lastAppliedMusic = { signature, lookup: false, positionMs: 0, atMs: Date.now(), playing: false };
   sendStatus("online", "Modo de mídia: nenhuma mídia agora - presence configurada ativa");
 }
@@ -602,13 +817,21 @@ function startRotation() {
   rotationTimer.unref();
 }
 
+function stopDynamicRefresh() {
+  if (dynamicRefreshTimer) clearTimeout(dynamicRefreshTimer);
+  dynamicRefreshTimer = undefined;
+}
+
 function clearActivePresence() {
   stopPriorityLoop();
   stopRotation();
+  stopDynamicRefresh();
   resetMusicUpdates();
   activeConfig = undefined;
   activeStartTimestamp = undefined;
+  activeProfileName = "";
   lastAppliedMusic = undefined;
+  lastConfiguredActivity = "";
   syncMediaWatcher();
 }
 
@@ -667,6 +890,7 @@ function disconnect() {
   stopConnectRetries();
   awayState = undefined;
   liveProfile = undefined;
+  automation = initialAutomationState();
   return enqueueConnection(() => disconnectNow());
 }
 
@@ -702,6 +926,7 @@ function stopConnectRetries() {
 }
 
 function retryEnabled(kind) {
+  if (kind === "resume") return true;
   return kind === "reconnect" ? runtimeSettings.autoReconnect : runtimeSettings.autoStartPresence;
 }
 
@@ -713,7 +938,7 @@ function scheduleConnectRetries(kind, initialDelay, resolveTarget) {
 
   retryKind = kind;
   const token = retryToken;
-  const label = kind === "reconnect" ? "Reconexão" : "Autoativação";
+  const label = { reconnect: "Reconexão", resume: "Reativação" }[kind] || "Autoativação";
 
   const scheduleAttempt = (delay) => {
     retryTimer = setTimeout(async () => {
@@ -727,7 +952,7 @@ function scheduleConnectRetries(kind, initialDelay, resolveTarget) {
 
       try {
         const target = resolveTarget();
-        await connect(target.config, { startTimestamp: target.startTimestamp });
+        await connect(target.config, { startTimestamp: target.startTimestamp, profileName: target.profileName });
         if (target.profileIndex !== undefined) setLiveProfile(target.profileIndex);
         if (token === retryToken) {
           retryAttempt = 0;
@@ -754,18 +979,22 @@ function scheduleConnectRetries(kind, initialDelay, resolveTarget) {
   return true;
 }
 
-function scheduleAutoStart(initialDelay = 8000) {
-  scheduleConnectRetries("autostart", initialDelay, () => {
-    const store = loadConfig();
-    return { config: store.profiles[store.activeProfile].config, profileIndex: store.activeProfile };
-  });
+function selectedProfileTarget() {
+  const store = loadConfig();
+  const profile = store.profiles[store.activeProfile];
+  return { config: profile.config, profileName: profile.name, profileIndex: store.activeProfile };
+}
+
+function scheduleAutoStart(initialDelay = 8000, kind = "autostart") {
+  scheduleConnectRetries(kind, initialDelay, selectedProfileTarget);
 }
 
 function handleClientDisconnected(client) {
   // A replaced or discarded client may still report its close later.
   if (rpc !== client) return;
 
-  const base = awayState?.previous || { config: activeConfig, startTimestamp: activeStartTimestamp };
+  const base = awayState?.previous
+    || { config: activeConfig, startTimestamp: activeStartTimestamp, profileName: activeProfileName };
   const target = base.config && !isQuitting ? base : undefined;
   awayState = undefined;
   rpc = undefined;
@@ -788,7 +1017,7 @@ async function refreshConfiguredPresence() {
   }
 
   try {
-    priorityUpdatePromise = sendActivity(configuredActivity());
+    priorityUpdatePromise = sendConfiguredActivity();
     await priorityUpdatePromise;
     sendStatus("online", activeStatusMessage());
   } catch (error) {
@@ -796,6 +1025,29 @@ async function refreshConfiguredPresence() {
   } finally {
     priorityUpdatePromise = undefined;
   }
+}
+
+// Clock variables, the "since"/"until" timer and the playing track change
+// the configured activity without any user action; resend only on a change.
+function checkDynamicPresence() {
+  if (!rpc || !activeConfig || presenceHidden() || isQuitting) return;
+  if (activeConfig.musicMode && latestPresentation.mode === "music") return;
+  if (!lastConfiguredActivity) return;
+
+  let next;
+  try {
+    next = JSON.stringify(configuredActivity());
+  } catch {
+    return;
+  }
+  if (next === lastConfiguredActivity || dynamicRefreshTimer) return;
+
+  const wait = Math.max(0, lastDynamicRefreshAt + DYNAMIC_REFRESH_SPACING_MS - Date.now());
+  dynamicRefreshTimer = setTimeout(() => {
+    dynamicRefreshTimer = undefined;
+    lastDynamicRefreshAt = Date.now();
+    refreshConfiguredPresence();
+  }, wait);
 }
 
 function startPriorityLoop() {
@@ -814,8 +1066,10 @@ async function connectNow(rawConfig, options = {}) {
   }
 
   const startTimestamp = config.showTimer ? (options.startTimestamp || new Date()) : undefined;
+  const profileName = String(options.profileName || "");
   // Validate before touching the connection: a bad field must not drop it.
-  configuredActivity(config, startTimestamp, 0);
+  configuredActivity(config, startTimestamp, 0, profileName);
+  const iconLookup = resolveApplicationIcon(clientId);
 
   stopPriorityLoop();
   stopRotation();
@@ -830,6 +1084,9 @@ async function connectNow(rawConfig, options = {}) {
     activeClientId = clientId;
     activityTypeSupported = true;
     musicArtSupported = true;
+    appIconSupported = true;
+    playerIconSupported = true;
+    activityNameSupported = true;
     client.on("disconnected", () => handleClientDisconnected(client));
 
     try {
@@ -842,8 +1099,11 @@ async function connectNow(rawConfig, options = {}) {
   }
 
   const client = rpc;
+  await Promise.race([iconLookup, new Promise((resolve) => setTimeout(resolve, APP_ICON_WAIT_MS))]);
+  const sentIcon = cachedApplicationIcon(clientId);
+  const firstActivity = configuredActivity(config, startTimestamp, 0, profileName);
   try {
-    await sendActivity(configuredActivity(config, startTimestamp, 0));
+    await sendActivity(firstActivity);
   } catch (error) {
     if (rpc === client && activeConfig) {
       // The connection is fine and Discord still shows the previous activity:
@@ -862,6 +1122,8 @@ async function connectNow(rawConfig, options = {}) {
   stopConnectRetries();
   activeConfig = config;
   activeStartTimestamp = startTimestamp;
+  activeProfileName = profileName;
+  lastConfiguredActivity = JSON.stringify(firstActivity);
   rotationIndex = 0;
   rotationAt = Date.now();
   // The configured presence was just applied, which matches the fallback state;
@@ -873,6 +1135,11 @@ async function connectNow(rawConfig, options = {}) {
 
   syncMediaWatcher();
   if (activeConfig.musicMode && latestMedia) maybeUpdateMusicPresence();
+
+  iconLookup.then(() => {
+    const icon = cachedApplicationIcon(clientId);
+    if (activeConfig === config && icon && icon !== sentIcon) refreshConfiguredPresence();
+  });
 }
 
 function awaySettings() {
@@ -901,7 +1168,7 @@ function mediaKeepsPresence() {
 }
 
 async function enterAway(settings) {
-  const previous = { config: activeConfig, startTimestamp: activeStartTimestamp };
+  const previous = { config: activeConfig, startTimestamp: activeStartTimestamp, profileName: activeProfileName };
 
   if (settings.mode === "hide") {
     awayState = { mode: "hide", previous };
@@ -926,13 +1193,14 @@ async function enterAway(settings) {
   awayState = { mode: "profile", profileName: profile.name, previous };
 
   try {
-    await connect(config);
+    await connect(config, { profileName: profile.name });
   } catch (error) {
     if (awayState?.previous !== previous) return;
     awayState = undefined;
     sendStatus("error", `Ausente: ${describeConnectionError(error)}`);
     if (!presenceConnected()) {
-      connect(previous.config, { startTimestamp: previous.startTimestamp }).catch(() => {});
+      connect(previous.config, { startTimestamp: previous.startTimestamp, profileName: previous.profileName })
+        .catch(() => {});
     }
   }
 }
@@ -941,7 +1209,7 @@ async function leaveAway() {
   const { previous } = awayState;
   awayState = undefined;
   try {
-    await connect(previous.config, { startTimestamp: previous.startTimestamp });
+    await connect(previous.config, { startTimestamp: previous.startTimestamp, profileName: previous.profileName });
   } catch (error) {
     sendStatus("error", describeConnectionError(error));
   }
@@ -1036,20 +1304,66 @@ async function importProfiles() {
   return { ok: true, count: imported.count, store: { ...normalized, startupStatus } };
 }
 
+function createSplash() {
+  splashWindow = new BrowserWindow({
+    show: false,
+    width: 480,
+    height: 270,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    center: true,
+    title: "RickDev Presence Studio",
+    backgroundColor: "#141415",
+    icon: path.join(__dirname, "..", "build", "icon.png"),
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+
+  splashWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  splashWindow.webContents.on("will-navigate", (event) => event.preventDefault());
+  splashWindow.once("ready-to-show", () => {
+    if (!splashWindow || splashWindow.isDestroyed()) return;
+    splashWindow.show();
+    splashShownAt = Date.now();
+  });
+  splashWindow.on("closed", () => {
+    splashWindow = undefined;
+  });
+  splashWindow.loadFile(path.join(__dirname, "renderer", "splash.html"));
+}
+
+function closeSplash() {
+  if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy();
+  splashWindow = undefined;
+}
+
+function revealMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return;
+  const remaining = splashShownAt ? SPLASH_MIN_VISIBLE_MS - (Date.now() - splashShownAt) : 0;
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
+  }, Math.max(0, remaining));
+}
+
 function createWindow(show = true) {
   mainWindow = new BrowserWindow({
-    show,
+    show: false,
     width: 1180,
     height: 820,
     minWidth: 980,
     minHeight: 680,
-    backgroundColor: "#090a0f",
+    backgroundColor: "#141415",
     icon: path.join(__dirname, "..", "build", "icon.png"),
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      color: "#090a0f",
-      symbolColor: "#a9aab7",
-      height: 38
+      color: "#0f0f10",
+      symbolColor: "#a1a1a6",
+      height: 40
     },
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -1071,11 +1385,13 @@ function createWindow(show = true) {
     if (url !== mainWindow.webContents.getURL()) event.preventDefault();
   });
 
+  if (show) setTimeout(revealMainWindow, MAIN_WINDOW_FALLBACK_MS).unref();
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   mainWindow.webContents.once("did-finish-load", scheduleUpdateCheck);
 
   mainWindow.on("hide", () => syncMediaWatcher());
   mainWindow.on("show", () => {
+    closeSplash();
     syncMediaWatcher();
     broadcastMusicState(true);
   });
@@ -1114,6 +1430,7 @@ function rememberProfileNames(store) {
 function setLiveProfile(index) {
   liveProfile = { index, since: Date.now() };
   refreshTray();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("presence:status", statusPayload());
 }
 
 function trayState() {
@@ -1152,26 +1469,65 @@ function refreshTray() {
   }
 }
 
-async function activateProfile(index) {
+// A choice made by hand wins over the automation until its rules change.
+function markManualChoice() {
+  automation = { ...automation, seed: true, applied: undefined, base: undefined };
+}
+
+// The automation switches what Discord shows without changing the profile
+// selected in the editor, so it never interrupts an edit or the next startup.
+async function activateProfile(index, { source = "tray" } = {}) {
   const store = loadConfig();
   const profile = store.profiles[index];
-  if (!profile) return;
+  if (!profile) return false;
 
+  const automatic = source === "automation";
+  if (!automatic) markManualChoice();
   stopConnectRetries();
   awayState = undefined;
   try {
-    await connect(profile.config);
+    await connect(profile.config, { profileName: profile.name });
   } catch (error) {
     const message = describeConnectionError(error);
-    if (presenceConnected()) sendStatus("online", "A presence anterior continua ativa");
+    if (presenceConnected()) sendStatus(automatic ? "error" : "online", automatic
+      ? `Automação: não foi possível ativar ${profile.name}`
+      : "A presence anterior continua ativa");
     else sendStatus("error", message);
-    tray.displayBalloon({ iconType: "warning", title: `Não foi possível ativar ${profile.name}`, content: message });
-    return;
+    if (!automatic) {
+      tray.displayBalloon({ iconType: "warning", title: `Não foi possível ativar ${profile.name}`, content: message });
+    }
+    return false;
   }
 
   setLiveProfile(index);
-  if (store.activeProfile !== index) saveConfig({ ...store, activeProfile: index });
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("profiles:selected", index);
+  if (!automatic && store.activeProfile !== index) saveConfig({ ...store, activeProfile: index });
+  if (automatic) sendStatus("online", activeStatusMessage());
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("profiles:selected", { index, source, name: profile.name });
+  }
+  return true;
+}
+
+async function checkAutomation() {
+  if (automationRunning || isQuitting) return;
+  const rules = runtimeSettings.automationRules || [];
+  if (!rules.some((rule) => rule.enabled)) {
+    automation = initialAutomationState();
+    return;
+  }
+  if (!presenceConnected() || awayState || retryKind) return;
+
+  automationRunning = true;
+  try {
+    const processes = needsProcessList(rules) ? await listProcesses() : new Set();
+    if (!processes || !presenceConnected() || awayState || retryKind) return;
+
+    const { state, action } = automationStep(automation, matchingRule(rules, { now: new Date(), processes }), liveProfile?.index);
+    automation = state;
+    if (action) await activateProfile(action.profile, { source: "automation" });
+  } finally {
+    automationRunning = false;
+  }
 }
 
 function createTray() {
@@ -1195,6 +1551,7 @@ app.whenReady().then(async () => {
 
   const startupStore = loadConfig();
   const launchedHidden = process.argv.includes("--hidden");
+  if (!launchedHidden) createSplash();
   runtimeSettings = { ...startupStore.settings };
   startupStatus = await startupManager.configure(runtimeSettings.startWithWindows);
 
@@ -1207,9 +1564,21 @@ app.whenReady().then(async () => {
     const store = loadConfig();
     const corruptedBackup = corruptedConfigBackup;
     corruptedConfigBackup = undefined;
-    return { ...store, startupStatus, presenceStatus: statusPayload(), corruptedBackup, appVersion: app.getVersion() };
+    const updated = launchedAfterUpdate;
+    launchedAfterUpdate = false;
+    return {
+      ...store,
+      startupStatus,
+      presenceStatus: statusPayload(),
+      corruptedBackup,
+      appVersion: app.getVersion(),
+      updated
+    };
   });
   ipcMain.handle("link:open", (_event, url) => openExternalLink(url));
+  ipcMain.on("ui:ready", (event) => {
+    if (mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents) revealMainWindow();
+  });
   ipcMain.handle("config:save", async (_event, config) => {
     const previous = runtimeSettings;
     const normalized = saveConfig(config);
@@ -1234,6 +1603,10 @@ app.whenReady().then(async () => {
 
     if (previous.awayAction !== runtimeSettings.awayAction || previous.awayMinutes !== runtimeSettings.awayMinutes) {
       checkAway();
+    }
+
+    if (JSON.stringify(previous.automationRules) !== JSON.stringify(runtimeSettings.automationRules)) {
+      checkAutomation();
     }
 
     return { ...normalized, startupStatus };
@@ -1261,9 +1634,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("presence:connect", async (_event, config) => {
     stopConnectRetries();
     awayState = undefined;
+    markManualChoice();
     try {
-      await connect(config);
-      setLiveProfile(loadConfig().activeProfile);
+      const store = loadConfig();
+      await connect(config, { profileName: store.profiles[store.activeProfile].name });
+      setLiveProfile(store.activeProfile);
       return { ok: true };
     } catch (error) {
       const message = describeConnectionError(error);
@@ -1273,9 +1648,13 @@ app.whenReady().then(async () => {
     }
   });
   ipcMain.handle("presence:disconnect", () => disconnect());
+  ipcMain.handle("automation:processes", async () => [...(await listProcesses()) || []].sort());
+  ipcMain.handle("update:install", () => installUpdate());
 
   setInterval(checkAway, AWAY_CHECK_INTERVAL_MS).unref();
   setInterval(refreshTray, TRAY_REFRESH_INTERVAL_MS).unref();
+  setInterval(checkDynamicPresence, DYNAMIC_CHECK_INTERVAL_MS).unref();
+  setInterval(checkAutomation, AUTOMATION_CHECK_INTERVAL_MS).unref();
   powerMonitor.on("lock-screen", () => {
     screenLocked = true;
     checkAway();
@@ -1285,8 +1664,15 @@ app.whenReady().then(async () => {
     checkAway();
   });
 
-  if (runtimeSettings.autoStartPresence) {
+  if (process.argv.includes("--resume")) {
+    scheduleAutoStart(3000, "resume");
+  } else if (runtimeSettings.autoStartPresence) {
     scheduleAutoStart(launchedHidden ? 12000 : 3000);
+  }
+
+  if (app.isPackaged) {
+    const cleanup = setTimeout(() => cleanupDownloads(updatesDirectory(), process.env.PORTABLE_EXECUTABLE_FILE), 20000);
+    cleanup.unref();
   }
 });
 
