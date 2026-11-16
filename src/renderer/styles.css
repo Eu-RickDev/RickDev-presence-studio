@@ -569,7 +569,8 @@ select option { color: var(--text); background: var(--card); }
   padding: 8px 20px;
 }
 
-.music-source > div { display: grid; gap: 2px; min-width: 0; }
+.music-source { flex-wrap: wrap; }
+.music-source > div { display: grid; flex: 1 1 160px; gap: 2px; min-width: 0; }
 .music-source strong { font-weight: 500; }
 
 .music-source span {
@@ -582,7 +583,7 @@ select option { color: var(--text); background: var(--card); }
 }
 
 .music-source.ignored strong { color: var(--muted); }
-.music-source > .music-source-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.music-source > .music-source-actions { display: flex; flex: 0 0 auto; gap: 8px; margin-left: auto; }
 .music-sources-empty { margin: 0; padding: 16px 20px; color: var(--muted); font-size: 13px; }
 .automation-rules .music-sources-empty { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; }
 

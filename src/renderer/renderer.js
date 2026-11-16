@@ -16,6 +16,7 @@ const musicCoverLookup = document.querySelector("#musicCoverLookup");
 const awayAction = document.querySelector("#awayAction");
 const awayMinutes = document.querySelector("#awayMinutes");
 const rotationFields = document.querySelector("#rotationFields");
+const imageRotationFields = document.querySelector("#imageRotationFields");
 const startupStatus = document.querySelector("#startupStatus");
 const settingsButton = document.querySelector("#settingsButton");
 const settingsModal = document.querySelector("#settingsModal");
@@ -61,6 +62,8 @@ let liveProfileIndex;
 let saveTimeout;
 let previewVariant = 0;
 let previewVariantAt = Date.now();
+let previewImageVariant = 0;
+let previewImageVariantAt = Date.now();
 let timerStartedAt = Date.now();
 let connected = false;
 const failedPreviewImages = new Set();
@@ -166,6 +169,7 @@ async function saveGlobalSettings() {
     musicCoverLookup: musicCoverLookup.checked,
     musicIgnoredApps: profileStore.settings?.musicIgnoredApps || [],
     musicVideoApps: profileStore.settings?.musicVideoApps || [],
+    musicDiscreetApps: profileStore.settings?.musicDiscreetApps || [],
     awayAction: awayAction.value,
     awayMinutes: Number(awayMinutes.value),
     automationRules: profileStore.settings?.automationRules || []
@@ -309,8 +313,18 @@ function normalizeUrl(value) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
+function imageFields(config) {
+  const list = [[config.largeImageKey, "Imagem grande"], [config.smallImageKey, "Imagem pequena"]];
+  if (!config.rotateImages) return list;
+  for (const slot of ROTATION_SLOTS) {
+    list.push([config[`largeImageKey${slot}`] || "", `Imagem grande ${slot}`]);
+    list.push([config[`smallImageKey${slot}`] || "", `Imagem pequena ${slot}`]);
+  }
+  return list;
+}
+
 function getImageError(config) {
-  for (const [value, name] of [[config.largeImageKey, "Imagem grande"], [config.smallImageKey, "Imagem pequena"]]) {
+  for (const [value, name] of imageFields(config)) {
     const image = value.trim();
     if (!/^https?:\/\//i.test(image)) continue;
     try {
@@ -340,7 +354,31 @@ function previewVariants(config) {
   return variants;
 }
 
+function previewImageVariants(config) {
+  const main = { large: config.largeImageKey.trim(), small: config.smallImageKey.trim(), slot: 1 };
+  const variants = [main];
+  if (!config.rotateImages) return variants;
+
+  for (const slot of ROTATION_SLOTS) {
+    const large = (config[`largeImageKey${slot}`] || "").trim();
+    const small = (config[`smallImageKey${slot}`] || "").trim();
+    if (large || small) variants.push({ large: large || main.large, small: small || main.small, slot });
+  }
+  return variants;
+}
+
+function followPreviewImage(field) {
+  const match = /^(?:largeImageKey|smallImageKey)(\d)?$/.exec(field?.name || "");
+  if (!match) return;
+  const slot = Number(match[1] || 1);
+  const index = previewImageVariants(getConfig()).findIndex((variant) => variant.slot === slot);
+  if (index < 0) return;
+  previewImageVariant = index;
+  previewImageVariantAt = Date.now();
+}
+
 function followPreviewVariant(field) {
+  followPreviewImage(field);
   const match = /^(?:details|state)(\d)?$/.exec(field?.name || "");
   if (!match) return;
   const slot = Number(match[1] || 1);
@@ -350,15 +388,26 @@ function followPreviewVariant(field) {
   previewVariantAt = Date.now();
 }
 
+function rotationDue(count, since, interval) {
+  return count > 1 && Date.now() - since >= (Number(interval) || 30) * 1000;
+}
+
 function advancePreviewVariant() {
   const config = getConfig();
-  const count = previewVariants(config).length;
-  if (count < 2) return;
-  const intervalMs = (Number(config.rotationInterval) || 30) * 1000;
-  if (Date.now() - previewVariantAt < intervalMs) return;
-  previewVariant = (previewVariant + 1) % count;
-  previewVariantAt = Date.now();
-  renderPreview();
+  const texts = previewVariants(config).length;
+  const images = previewImageVariants(config).length;
+  let changed = false;
+  if (rotationDue(texts, previewVariantAt, config.rotationInterval)) {
+    previewVariant = (previewVariant + 1) % texts;
+    previewVariantAt = Date.now();
+    changed = true;
+  }
+  if (rotationDue(images, previewImageVariantAt, config.imageRotationInterval)) {
+    previewImageVariant = (previewImageVariant + 1) % images;
+    previewImageVariantAt = Date.now();
+    changed = true;
+  }
+  if (changed) renderPreview();
 }
 
 function getButtonError(config) {
@@ -407,11 +456,12 @@ function renderMusicSources() {
   const ignoredApps = profileStore?.settings?.musicIgnoredApps || [];
   const detected = musicState?.sources || [];
   const videoApps = profileStore?.settings?.musicVideoApps || [];
+  const discreetApps = profileStore?.settings?.musicDiscreetApps || [];
 
   const rows = detected.map((source) => ({ ...source, detected: true }));
   for (const app of ignoredApps) {
     if (!detected.some((source) => source.app.toLowerCase() === app)) {
-      rows.push({ app, title: "", playing: false, ignored: true, video: videoApps.includes(app), detected: false });
+      rows.push({ app, title: "", playing: false, ignored: true, video: videoApps.includes(app), discreet: discreetApps.includes(app), detected: false });
     }
   }
 
@@ -438,7 +488,7 @@ function renderMusicSources() {
     const name = document.createElement("strong");
     name.textContent = row.player ? `${sourceLabel(row.app)} · ${row.player}` : sourceLabel(row.app);
     const detail = document.createElement("span");
-    const kind = row.video || row.reportedVideo ? " · vídeo" : "";
+    const kind = `${row.video || row.reportedVideo ? " · vídeo" : ""}${row.discreet ? " · discreta" : ""}`;
     detail.textContent = !row.detected
       ? "Bloqueada (sem mídia agora)"
       : row.ignored
@@ -457,6 +507,19 @@ function renderMusicSources() {
       video.dataset.app = row.app;
       video.dataset.video = row.video ? "0" : "1";
       actions.append(video);
+    }
+
+    if (!row.ignored) {
+      const discreet = document.createElement("button");
+      discreet.type = "button";
+      discreet.className = `ghost-button${row.discreet ? " selected" : ""}`;
+      discreet.textContent = "Discreta";
+      discreet.title = row.discreet
+        ? "Voltar a mostrar o que toca nesta fonte"
+        : "Mostrar só Música ou Vídeo no Discord, sem título, artista nem capa";
+      discreet.dataset.app = row.app;
+      discreet.dataset.discreet = row.discreet ? "0" : "1";
+      actions.append(discreet);
     }
 
     const action = document.createElement("button");
@@ -483,6 +546,19 @@ async function toggleVideoSource(app, video) {
   showToast(video
     ? `${sourceLabel(app)} aparece como Assistindo.`
     : `${sourceLabel(app)} volta a aparecer como Ouvindo.`);
+}
+
+async function toggleDiscreetSource(app, discreet) {
+  if (!profileStore) return;
+  const list = new Set(profileStore.settings?.musicDiscreetApps || []);
+  if (discreet) list.add(app.toLowerCase());
+  else list.delete(app.toLowerCase());
+  profileStore.settings.musicDiscreetApps = [...list];
+  renderMusicSources.signature = undefined;
+  await saveGlobalSettings();
+  showToast(discreet
+    ? `${sourceLabel(app)} fica discreta: o Discord mostra só Música ou Vídeo.`
+    : `${sourceLabel(app)} volta a mostrar o que está tocando.`);
 }
 
 async function toggleIgnoredSource(app, ignore) {
@@ -546,18 +622,25 @@ function renderPreview() {
     : undefined;
   const music = currentMusic(config);
   const musicPaused = Boolean(music && musicState.presentation.paused);
-  const player = music && config.musicPlayerIcon && !config.smallImageKey.trim() ? PresenceFormat.playerInfo(music.player || music.app) : undefined;
-  const largeImageUrl = music?.artUrl
-    || previewImage(config.largeImageKey, matchingApplication)
-    || (!config.largeImageKey.trim() ? matchingApplication?.iconUrl : "");
-  const smallImageUrl = player?.icon || previewImage(config.smallImageKey, matchingApplication);
+  const discreet = Boolean(music && (config.musicDiscreet || music.discreet));
+  const images = previewImageVariants(config);
+  if (previewImageVariant >= images.length) previewImageVariant = 0;
+  const image = music ? images[0] : images[previewImageVariant];
+  const player = music && config.musicPlayerIcon && !image.small ? PresenceFormat.playerInfo(music.player || music.app) : undefined;
+  const largeImageUrl = (discreet ? "" : music?.artUrl)
+    || previewImage(image.large, matchingApplication)
+    || (!image.large ? matchingApplication?.iconUrl : "");
+  const smallImageUrl = player?.icon || previewImage(image.small, matchingApplication);
   const variants = previewVariants(config);
   if (previewVariant >= variants.length) previewVariant = 0;
   const text = variants[previewVariant];
   const context = textContext();
-  const largeKeyIsLink = /^https?:\/\//i.test(config.largeImageKey.trim());
+  const largeKeyIsLink = /^https?:\/\//i.test(image.large);
+  const musicTitle = discreet ? PresenceFormat.discreetTitle(music) : music?.title || "";
+  const musicArtist = discreet ? "" : music?.artist || "";
 
   rotationFields.hidden = !config.rotateTexts;
+  imageRotationFields.hidden = !config.rotateImages;
   timerFields.hidden = !config.showTimer;
   timerTimeField.hidden = config.timerMode === "elapsed";
   setInfo(timerModeInfo, TIMER_NOTES[config.timerMode] || TIMER_NOTES.elapsed);
@@ -570,22 +653,30 @@ function renderPreview() {
     || (config.clientId ? `App ${config.clientId.slice(0, 8)}` : "Seu aplicativo");
   const previewDetails = document.querySelector("#previewDetails");
   previewDetails.textContent = music
-    ? music.title
+    ? musicTitle
     : PresenceFormat.resolveText(text.details, context).trim();
   previewDetails.title = previewDetails.textContent;
   const previewState = document.querySelector("#previewState");
   previewState.textContent = music
-    ? (musicPaused ? (music.artist ? `Em pausa - ${music.artist}` : "Em pausa") : music.artist)
+    ? (musicPaused ? (musicArtist ? `Em pausa - ${musicArtist}` : "Em pausa") : musicArtist)
     : PresenceFormat.resolveText(text.state, context).trim();
   previewState.title = previewState.textContent;
   const intervalOption = document.querySelector('select[name="rotationInterval"]').selectedOptions[0];
   document.querySelector("#previewRotation").textContent = !music && variants.length > 1
     ? `Mostrando o texto ${previewVariant + 1} de ${variants.length}, que troca a cada ${intervalOption?.textContent || "30 segundos"}`
     : "";
+  const imageOption = document.querySelector('select[name="imageRotationInterval"]').selectedOptions[0];
+  document.querySelector("#previewImageRotation").textContent = !music && images.length > 1
+    ? `Mostrando a imagem ${previewImageVariant + 1} de ${images.length}, que troca a cada ${imageOption?.textContent || "30 segundos"}`
+    : "";
+  const shownLine = { details: previewDetails.textContent, state: previewState.textContent }[config.statusDisplay];
+  document.querySelector("#previewMemberList").textContent = shownLine
+    ? `Na lista de membros: ${document.querySelector("#previewMode").textContent} ${shownLine}`
+    : "";
   document.querySelector("#largeAssetFallback").textContent = music
-    ? music.title.slice(0, 1).toUpperCase()
-    : config.largeImageKey && !largeKeyIsLink
-      ? config.largeImageKey.slice(0, 2).toUpperCase()
+    ? musicTitle.slice(0, 1).toUpperCase()
+    : image.large && !largeKeyIsLink
+      ? image.large.slice(0, 2).toUpperCase()
       : matchingApplication?.name?.slice(0, 1).toUpperCase() || "R";
   setPreviewImage("#largeAsset", "#largeAssetImage", largeImageUrl, "Imagem grande da presence");
   document.querySelector("#smallAsset").title = player?.name || "";
@@ -608,7 +699,7 @@ function renderPreview() {
 }
 
 function renderPreviewButtons(config, music) {
-  const listen = music && !music.video
+  const listen = music && !music.video && !config.musicDiscreet && !music.discreet
     ? PresenceFormat.musicButton(config.musicButton, music, { app: music.player || music.app, links: music.links || {} })
     : undefined;
   const buttons = [
@@ -646,7 +737,18 @@ function syncPreviewVariant(text) {
   renderPreview();
 }
 
-function setStatus({ status, message, startedAt, connected: isConnected, text, liveProfile }) {
+function syncPreviewImage(image) {
+  if (!image || /^(?:largeImageKey|smallImageKey)\d?$/.test(document.activeElement?.name || "")) return;
+  const index = previewImageVariants(getConfig()).findIndex((variant) => variant.slot === image.slot);
+  if (index < 0) return;
+  const since = Number.isFinite(image.since) ? image.since : Date.now();
+  if (index === previewImageVariant && since === previewImageVariantAt) return;
+  previewImageVariant = index;
+  previewImageVariantAt = since;
+  renderPreview();
+}
+
+function setStatus({ status, message, startedAt, connected: isConnected, text, image, liveProfile }) {
   const wasConnected = connected;
   connected = typeof isConnected === "boolean" ? isConnected : status === "online";
   const nextLive = connected && Number.isInteger(liveProfile) ? liveProfile : undefined;
@@ -658,7 +760,10 @@ function setStatus({ status, message, startedAt, connected: isConnected, text, l
   statusPill.className = `connection-pill ${status}`;
   statusText.textContent = message;
   connectButton.querySelector("span").textContent = connected ? "Atualizar presence" : "Ativar presence";
-  if (connected) syncPreviewVariant(text);
+  if (connected) {
+    syncPreviewVariant(text);
+    syncPreviewImage(image);
+  }
   if (connected !== wasConnected) renderPreview();
 }
 
@@ -991,9 +1096,9 @@ form.addEventListener("input", handleConfigInput);
 mediaTab.addEventListener("input", handleConfigInput);
 form.addEventListener("focusin", (event) => {
   if (TEXT_FIELD_PATTERN.test(event.target.name || "")) lastTextField = event.target;
-  const before = previewVariant;
+  const before = [previewVariant, previewImageVariant].join();
   followPreviewVariant(event.target);
-  if (previewVariant !== before) renderPreview();
+  if ([previewVariant, previewImageVariant].join() !== before) renderPreview();
 });
 
 variableBar.addEventListener("mousedown", (event) => {
@@ -1116,6 +1221,7 @@ document.querySelector("#resetButton").addEventListener("click", () => {
     } else if (field.name !== "clientId") field.value = "";
   });
   previewVariant = 0;
+  previewImageVariant = 0;
   syncMediaWatch();
   renderPreview();
   flushProfiles();
@@ -1290,6 +1396,7 @@ document.querySelector("#musicSources").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-app]");
   if (!button) return;
   if (button.dataset.video) toggleVideoSource(button.dataset.app, button.dataset.video === "1");
+  else if (button.dataset.discreet) toggleDiscreetSource(button.dataset.app, button.dataset.discreet === "1");
   else toggleIgnoredSource(button.dataset.app, button.dataset.ignore === "1");
 });
 window.presenceAPI.onUpdateAvailable(showUpdate);

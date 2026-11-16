@@ -75,6 +75,14 @@
                       <option value="competing">Competindo em</option>
                     </select>
                   </label>
+                  <label class="full">
+                    <span>Na lista de membros <span class="info" tabindex="0" data-tip="O que aparece ao lado do seu nome na lista de membros do servidor. Com Detalhes, aparece “Ouvindo Copines” no lugar de “Ouvindo Spotify”. No modo de mídia, os detalhes são a música e o estado é o artista."></span></span>
+                    <select id="statusDisplay" name="statusDisplay">
+                      <option value="name" selected>Nome do app</option>
+                      <option value="details">Detalhes</option>
+                      <option value="state">Estado</option>
+                    </select>
+                  </label>
                 </fieldset>
 
                 <fieldset class="card">
@@ -169,6 +177,51 @@
                     <span>Texto da imagem pequena</span>
                     <input id="smallImageText" name="smallImageText" maxlength="128" placeholder="Aparece ao passar o mouse">
                   </label>
+
+                  <label class="toggle-row full inner-toggle">
+                    <div>
+                      <strong>Alternar imagens <span class="info" tabindex="0" data-tip="Reveza as imagens acima com as variações abaixo. Um campo vazio mantém a imagem principal, então dá para trocar só a grande ou só a pequena."></span></strong>
+                    </div>
+                    <input id="rotateImages" name="rotateImages" type="checkbox">
+                    <i></i>
+                  </label>
+
+                  <div class="rotation-fields" id="imageRotationFields" hidden>
+                    <label>
+                      <span>Imagem grande 2</span>
+                      <input name="largeImageKey2" maxlength="256" placeholder="Chave do asset ou link https://">
+                    </label>
+                    <label>
+                      <span>Imagem pequena 2</span>
+                      <input name="smallImageKey2" maxlength="256" placeholder="Opcional">
+                    </label>
+                    <label>
+                      <span>Imagem grande 3</span>
+                      <input name="largeImageKey3" maxlength="256" placeholder="Opcional">
+                    </label>
+                    <label>
+                      <span>Imagem pequena 3</span>
+                      <input name="smallImageKey3" maxlength="256" placeholder="Opcional">
+                    </label>
+                    <label>
+                      <span>Imagem grande 4</span>
+                      <input name="largeImageKey4" maxlength="256" placeholder="Opcional">
+                    </label>
+                    <label>
+                      <span>Imagem pequena 4</span>
+                      <input name="smallImageKey4" maxlength="256" placeholder="Opcional">
+                    </label>
+                    <label>
+                      <span>Trocar a cada</span>
+                      <select name="imageRotationInterval">
+                        <option value="15">15 segundos</option>
+                        <option value="30" selected>30 segundos</option>
+                        <option value="60">1 minuto</option>
+                        <option value="120">2 minutos</option>
+                        <option value="300">5 minutos</option>
+                      </select>
+                    </label>
+                  </div>
                 </fieldset>
 
                 <fieldset class="card">
@@ -266,6 +319,14 @@
                   <i></i>
                 </label>
 
+                <label class="toggle-row">
+                  <div>
+                    <strong>Mídia discreta <span class="info" tabindex="0" data-tip="Esconde o título, o artista e a capa de todas as fontes. O Discord mostra só Música ou Vídeo, com o player e o tempo, sem o botão da música. Para esconder só uma fonte, use Discreta em Fontes. Vale para este perfil."></span></strong>
+                  </div>
+                  <input id="musicDiscreet" name="musicDiscreet" type="checkbox">
+                  <i></i>
+                </label>
+
                 <label class="setting-row">
                   <div>
                     <strong>Botão da música <span class="info" tabindex="0" data-tip="Um botão para quem vê seu perfil abrir a faixa. Ele vem primeiro e ocupa o lugar do botão 2 do perfil. Automático usa o serviço do player e, se ele não for conhecido, o link achado na busca da capa ou o YouTube Music. Vale para este perfil."></span></strong>
@@ -281,7 +342,7 @@
                 </label>
               </div>
 
-              <h2 class="section-title">Fontes <span class="info" tabindex="0" data-tip="Escolha quais aplicativos podem alimentar o modo de mídia e quais mostram vídeo. Uma fonte marcada como vídeo aparece como Assistindo, sem busca de capa nem botão da música. Vídeos de players como o VLC são reconhecidos sozinhos, mas os navegadores informam tudo como música."></span></h2>
+              <h2 class="section-title">Fontes <span class="info" tabindex="0" data-tip="Escolha quais aplicativos podem alimentar o modo de mídia e quais mostram vídeo. Uma fonte marcada como vídeo aparece como Assistindo, sem busca de capa nem botão da música. Uma fonte discreta aparece só como Música ou Vídeo, sem título, artista nem capa, em todos os perfis. Vídeos de players como o VLC são reconhecidos sozinhos, mas os navegadores informam tudo como música."></span></h2>
               <div class="card list-card music-sources" id="musicSources"></div>
             </div>
           </section>
@@ -319,7 +380,9 @@
               </div>
 
               <div class="preview-notes">
+                <span id="previewMemberList"></span>
                 <span id="previewRotation"></span>
+                <span id="previewImageRotation"></span>
                 <span id="musicHint"></span>
               </div>
 

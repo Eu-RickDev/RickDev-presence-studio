@@ -22,7 +22,7 @@ const {
   selectMediaSession
 } = require("./media");
 const { EMPTY_TRACK_INFO, fetchTrackInfo } = require("./artwork");
-const { buildActivity, buildButtons, rotationIntervalMs, textVariants } = require("./activity");
+const { buildActivity, buildButtons, imageVariants, rotationIntervalMs, textVariants } = require("./activity");
 const { trayMenuTemplate, trayTooltip } = require("./tray");
 const { musicButton, playerInfo, usesMediaVariables } = require("./renderer/presence-format");
 const {
@@ -105,6 +105,9 @@ let activityTypeSupported = true;
 let rotationTimer;
 let rotationIndex = 0;
 let rotationAt = 0;
+let imageRotationTimer;
+let imageRotationIndex = 0;
+let imageRotationAt = 0;
 let awayState;
 let awayCheckRunning = false;
 let screenLocked = false;
@@ -112,6 +115,7 @@ let musicArtSupported = true;
 let appIconSupported = true;
 let playerIconSupported = true;
 let activityNameSupported = true;
+let statusDisplaySupported = true;
 let lastConfiguredActivity = "";
 let dynamicRefreshTimer;
 let lastDynamicRefreshAt = 0;
@@ -359,6 +363,13 @@ function currentText() {
   return { slot: variants[rotationIndex % variants.length].slot, since: rotationAt };
 }
 
+function currentImage() {
+  if (!activeConfig || awayState) return undefined;
+  const variants = imageVariants(activeConfig);
+  if (variants.length < 2) return undefined;
+  return { slot: variants[imageRotationIndex % variants.length].slot, since: imageRotationAt };
+}
+
 function statusPayload() {
   const connected = presenceConnected();
   return {
@@ -366,6 +377,7 @@ function statusPayload() {
     connected,
     startedAt: connected ? activeStartTimestamp?.getTime() : undefined,
     text: connected ? currentText() : undefined,
+    image: connected ? currentImage() : undefined,
     liveProfile: connected ? liveProfile?.index : undefined
   };
 }
@@ -385,12 +397,15 @@ function configuredActivity(
   config = activeConfig,
   startTimestamp = activeStartTimestamp,
   variant = rotationIndex,
-  profileName = activeProfileName
+  profileName = activeProfileName,
+  imageVariant = imageRotationIndex
 ) {
   return buildActivity(config, {
     startTimestamp,
     variant,
+    imageVariant,
     includeType: activityTypeSupported,
+    includeStatusDisplay: statusDisplaySupported,
     appIcon: cachedApplicationIcon(config.clientId),
     context: { profileName, media: playingMedia() }
   });
@@ -468,6 +483,14 @@ function videoApps() {
   return new Set((runtimeSettings.musicVideoApps || []).map((app) => app.toLowerCase()));
 }
 
+function discreetApps() {
+  return new Set((runtimeSettings.musicDiscreetApps || []).map((app) => app.toLowerCase()));
+}
+
+function trackLookupWanted(media) {
+  return Boolean(media?.active) && coverLookupAllowed() && !media.video && !media.discreet;
+}
+
 function trackLinks(info) {
   return info.trackUrl && info.service ? { [info.service]: info.trackUrl } : {};
 }
@@ -476,12 +499,13 @@ function broadcastMusicState(force = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
   const media = latestMedia?.active ? latestMedia : undefined;
-  const info = media && coverLookupAllowed() && !media.video ? cachedTrackInfo(media) : EMPTY_TRACK_INFO;
+  const info = trackLookupWanted(media) ? cachedTrackInfo(media) : EMPTY_TRACK_INFO;
   const artUrl = info.artUrl;
   const album = media?.album || info.album;
 
   const ignoredApps = new Set((runtimeSettings.musicIgnoredApps || []).map((app) => app.toLowerCase()));
   const markedVideo = videoApps();
+  const markedDiscreet = discreetApps();
   const sources = (lastMediaPayload?.sessions || []).map((session) => ({
     app: session.app,
     player: session.player,
@@ -489,6 +513,7 @@ function broadcastMusicState(force = false) {
     playing: session.playing,
     ignored: ignoredApps.has(session.app.toLowerCase()),
     video: markedVideo.has(session.app.toLowerCase()),
+    discreet: markedDiscreet.has(session.app.toLowerCase()),
     reportedVideo: session.video
   }));
 
@@ -497,7 +522,7 @@ function broadcastMusicState(force = false) {
   const now = Date.now();
   const signature = [
     Boolean(mediaWatcher), musicWatcherError, latestPresentation.mode, latestPresentation.paused,
-    media?.title, media?.artist, album, media?.playing, media?.durationMs, artUrl, media?.video,
+    media?.title, media?.artist, album, media?.playing, media?.durationMs, artUrl, media?.video, media?.discreet,
     info.trackUrl, JSON.stringify(sources)
   ].join("|");
   let positionDrift = 0;
@@ -520,15 +545,16 @@ function broadcastMusicState(force = false) {
 function handleMediaState(payload) {
   lastMediaPayload = payload;
   const selected = selectMediaSession(payload, runtimeSettings.musicIgnoredApps);
-  const state = selected.active && !selected.video && videoApps().has(selected.app.toLowerCase())
-    ? { ...selected, video: true }
-    : selected;
+  const sourceApp = selected.active ? selected.app.toLowerCase() : "";
+  let state = selected;
+  if (sourceApp && !state.video && videoApps().has(sourceApp)) state = { ...state, video: true };
+  if (sourceApp && discreetApps().has(sourceApp)) state = { ...state, discreet: true };
   latestMedia = state;
   if (state.active && state.playing) lastPlayingAt = Date.now();
   latestPresentation = derivePresentation(state, lastPlayingAt);
   broadcastMusicState();
 
-  if (state.active && coverLookupAllowed() && !state.video) {
+  if (trackLookupWanted(state)) {
     const key = trackArtKey(state);
     lookupTrackInfo(state).then((info) => {
       if (!coverLookupAllowed() || !latestMedia?.active || trackArtKey(latestMedia) !== key) return;
@@ -537,7 +563,7 @@ function handleMediaState(payload) {
       // A cover that resolved after the presence was applied does not change
       // the signature; force one reapply so Discord picks it up.
       const extras = trackLookupExtras(latestMedia, info);
-      if ((extras.artUrl || extras.album) && lastAppliedMusic && !lastAppliedMusic.lookup
+      if ((extras.artUrl || extras.album) && !activeConfig?.musicDiscreet && lastAppliedMusic && !lastAppliedMusic.lookup
         && lastAppliedMusic.signature !== "fallback") {
         maybeUpdateMusicPresence(true);
       }
@@ -606,7 +632,7 @@ function withoutAsset(activity, ...keys) {
 async function sendActivity(activity, { artUrl = "", fallbackImage = "", playerIcon = "" } = {}) {
   let current = activity;
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
       await setRawActivity(current);
       return;
@@ -638,6 +664,13 @@ async function sendActivity(activity, { artUrl = "", fallbackImage = "", playerI
         if (fallbackImage && fallbackImage !== artUrl) current.assets.large_image = fallbackImage;
         else delete current.assets.large_image;
         if (!Object.keys(current.assets).length) delete current.assets;
+        continue;
+      }
+
+      if (current.status_display_type !== undefined && /status_display/i.test(message)) {
+        statusDisplaySupported = false;
+        current = { ...current };
+        delete current.status_display_type;
         continue;
       }
 
@@ -673,7 +706,8 @@ async function applyMusicPresence(signature) {
   const presentation = latestPresentation;
 
   if (presentation.mode === "music" && media?.active) {
-    const info = coverLookupAllowed() && !media.video ? await lookupTrackInfo(media) : EMPTY_TRACK_INFO;
+    const discreet = activeConfig.musicDiscreet || media.discreet;
+    const info = trackLookupWanted(media) && !discreet ? await lookupTrackInfo(media) : EMPTY_TRACK_INFO;
     if (!rpc || !activeConfig?.musicMode) return;
 
     if (musicTrackKey !== trackArtKey(media)) {
@@ -687,7 +721,7 @@ async function applyMusicPresence(signature) {
     const activityName = activeConfig.musicPlayerName && activityNameSupported
       ? playerInfo(media.player || media.app)?.name || ""
       : "";
-    const listenButton = media.video
+    const listenButton = media.video || discreet
       ? undefined
       : musicButton(activeConfig.musicButton, media, { app: media.player || media.app, links: trackLinks(info) });
     const activity = buildMusicActivity(activeConfig, { ...media, album: media.album || extras.album }, {
@@ -698,6 +732,7 @@ async function applyMusicPresence(signature) {
       activityName,
       buttons: [listenButton, ...buildButtons(activeConfig)].filter(Boolean).slice(0, 2),
       includeType: activityTypeSupported,
+      includeStatusDisplay: statusDisplaySupported,
       context: { profileName: activeProfileName },
       now: Date.now(),
       fallbackStart: musicTrackStartedAt
@@ -800,21 +835,38 @@ function stopPriorityLoop() {
 
 function stopRotation() {
   if (rotationTimer) clearInterval(rotationTimer);
+  if (imageRotationTimer) clearInterval(imageRotationTimer);
   rotationTimer = undefined;
+  imageRotationTimer = undefined;
+}
+
+function rotationPaused() {
+  return !activeConfig || presenceHidden() || (activeConfig.musicMode && latestPresentation.mode === "music");
 }
 
 function startRotation() {
   stopRotation();
-  if (!activeConfig || textVariants(activeConfig).length < 2) return;
+  if (!activeConfig) return;
 
-  rotationTimer = setInterval(() => {
-    if (!activeConfig || presenceHidden()) return;
-    if (activeConfig.musicMode && latestPresentation.mode === "music") return;
-    rotationIndex = (rotationIndex + 1) % textVariants(activeConfig).length;
-    rotationAt = Date.now();
-    refreshConfiguredPresence();
-  }, rotationIntervalMs(activeConfig));
-  rotationTimer.unref();
+  if (textVariants(activeConfig).length > 1) {
+    rotationTimer = setInterval(() => {
+      if (rotationPaused()) return;
+      rotationIndex = (rotationIndex + 1) % textVariants(activeConfig).length;
+      rotationAt = Date.now();
+      refreshConfiguredPresence();
+    }, rotationIntervalMs(activeConfig));
+    rotationTimer.unref();
+  }
+
+  if (imageVariants(activeConfig).length > 1) {
+    imageRotationTimer = setInterval(() => {
+      if (rotationPaused()) return;
+      imageRotationIndex = (imageRotationIndex + 1) % imageVariants(activeConfig).length;
+      imageRotationAt = Date.now();
+      refreshConfiguredPresence();
+    }, rotationIntervalMs(activeConfig, "imageRotationInterval"));
+    imageRotationTimer.unref();
+  }
 }
 
 function stopDynamicRefresh() {
@@ -1068,7 +1120,7 @@ async function connectNow(rawConfig, options = {}) {
   const startTimestamp = config.showTimer ? (options.startTimestamp || new Date()) : undefined;
   const profileName = String(options.profileName || "");
   // Validate before touching the connection: a bad field must not drop it.
-  configuredActivity(config, startTimestamp, 0, profileName);
+  configuredActivity(config, startTimestamp, 0, profileName, 0);
   const iconLookup = resolveApplicationIcon(clientId);
 
   stopPriorityLoop();
@@ -1087,6 +1139,7 @@ async function connectNow(rawConfig, options = {}) {
     appIconSupported = true;
     playerIconSupported = true;
     activityNameSupported = true;
+    statusDisplaySupported = true;
     client.on("disconnected", () => handleClientDisconnected(client));
 
     try {
@@ -1101,7 +1154,7 @@ async function connectNow(rawConfig, options = {}) {
   const client = rpc;
   await Promise.race([iconLookup, new Promise((resolve) => setTimeout(resolve, APP_ICON_WAIT_MS))]);
   const sentIcon = cachedApplicationIcon(clientId);
-  const firstActivity = configuredActivity(config, startTimestamp, 0, profileName);
+  const firstActivity = configuredActivity(config, startTimestamp, 0, profileName, 0);
   try {
     await sendActivity(firstActivity);
   } catch (error) {
@@ -1126,6 +1179,8 @@ async function connectNow(rawConfig, options = {}) {
   lastConfiguredActivity = JSON.stringify(firstActivity);
   rotationIndex = 0;
   rotationAt = Date.now();
+  imageRotationIndex = 0;
+  imageRotationAt = rotationAt;
   // The configured presence was just applied, which matches the fallback state;
   // the next media tick promotes it to the playing track.
   lastAppliedMusic = { signature: "fallback", lookup: false, positionMs: 0, atMs: Date.now(), playing: false };

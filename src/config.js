@@ -17,6 +17,7 @@ const defaultSettings = {
   musicCoverLookup: true,
   musicIgnoredApps: [],
   musicVideoApps: [],
+  musicDiscreetApps: [],
   awayAction: "off",
   awayMinutes: 10,
   automationRules: []
@@ -25,6 +26,7 @@ const defaultSettings = {
 const defaults = {
   clientId: "",
   activityType: "playing",
+  statusDisplay: "name",
   details: "Criando algo incrível",
   state: "No RickDev Presence Studio",
   rotateTexts: false,
@@ -39,6 +41,14 @@ const defaults = {
   largeImageText: "",
   smallImageKey: "",
   smallImageText: "",
+  rotateImages: false,
+  imageRotationInterval: "30",
+  largeImageKey2: "",
+  smallImageKey2: "",
+  largeImageKey3: "",
+  smallImageKey3: "",
+  largeImageKey4: "",
+  smallImageKey4: "",
   button1Label: "",
   button1Url: "",
   button2Label: "",
@@ -51,6 +61,7 @@ const defaults = {
   musicPlayerIcon: true,
   musicAsPlaying: false,
   musicPlayerName: false,
+  musicDiscreet: false,
   musicButton: "off"
 };
 
@@ -69,6 +80,12 @@ const textLimits = {
   largeImageText: 128,
   smallImageKey: 256,
   smallImageText: 128,
+  largeImageKey2: 256,
+  smallImageKey2: 256,
+  largeImageKey3: 256,
+  smallImageKey3: 256,
+  largeImageKey4: 256,
+  smallImageKey4: 256,
   button1Label: 32,
   button1Url: 512,
   button2Label: 32,
@@ -78,7 +95,9 @@ const textLimits = {
 
 const choiceFields = {
   activityType: ["playing", "listening", "watching", "competing"],
+  statusDisplay: ["name", "details", "state"],
   rotationInterval: ["15", "30", "60", "120", "300"],
+  imageRotationInterval: ["15", "30", "60", "120", "300"],
   timerMode: ["elapsed", "since", "until"],
   musicButton: ["off", "auto", "youtube", "spotify", "deezer", "apple"]
 };
@@ -141,6 +160,7 @@ function normalizeSettings(raw) {
       : defaultSettings.musicCoverLookup,
     musicIgnoredApps: appList(rawIgnored),
     musicVideoApps: appList(source.musicVideoApps),
+    musicDiscreetApps: appList(source.musicDiscreetApps),
     awayAction: AWAY_ACTIONS.includes(source.awayAction) ? source.awayAction : defaultSettings.awayAction,
     awayMinutes: AWAY_MINUTES.includes(Number(source.awayMinutes))
       ? Number(source.awayMinutes)

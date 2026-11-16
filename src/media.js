@@ -1,5 +1,5 @@
 const { spawn } = require("child_process");
-const { playerInfo, resolveText } = require("./renderer/presence-format");
+const { discreetTitle, playerInfo, resolveText, statusDisplayType } = require("./renderer/presence-format");
 
 const PAUSE_GRACE_MS = 30 * 1000;
 const SEEK_TOLERANCE_MS = 5000;
@@ -205,7 +205,8 @@ function derivePresentation(media, lastPlayingAt, nowMs = Date.now(), graceMs = 
 function mediaSignature(presentation, media) {
   if (presentation?.mode !== "music" || !media?.active) return "fallback";
   return [
-    media.video ? "video" : "music", media.title, media.artist, media.album, media.app, media.player,
+    media.video ? "video" : "music", media.discreet ? "discreet" : "open",
+    media.title, media.artist, media.album, media.app, media.player,
     presentation.paused ? "paused" : "playing"
   ].join("|");
 }
@@ -237,32 +238,39 @@ function buildMusicActivity(config, media, options = {}) {
     activityName = "",
     buttons = [],
     includeType = true,
+    includeStatusDisplay = true,
     context = {},
     now = Date.now(),
     fallbackStart = now
   } = options;
+  const discreet = Boolean(config.musicDiscreet || media.discreet);
 
   const activity = { instance: false };
   if (includeType && !config.musicAsPlaying) activity.type = media.video ? 3 : 2;
   const name = presenceText(activityName);
   if (name) activity.name = name;
 
-  const details = presenceText(media.title);
+  const details = presenceText(discreet ? discreetTitle(media) : media.title);
   if (details) activity.details = details;
 
-  const stateText = paused
-    ? (media.artist ? `Em pausa - ${media.artist}` : "Em pausa")
-    : media.artist;
+  const artist = discreet ? "" : media.artist;
+  const stateText = paused ? (artist ? `Em pausa - ${artist}` : "Em pausa") : artist;
   const state = presenceText(stateText);
   if (state) activity.state = state;
 
+  if (includeStatusDisplay) {
+    const display = statusDisplayType(config.statusDisplay, activity);
+    if (display) activity.status_display_type = display;
+  }
+
   const assets = {};
-  const largeImage = String(artUrl || "").slice(0, 256)
+  const largeImage = (discreet ? "" : String(artUrl || "").slice(0, 256))
     || String(config.largeImageKey || "").trim()
     || String(appIcon || "").slice(0, 256);
   if (largeImage) assets.large_image = largeImage;
-  const textContext = { now, media, ...context };
-  const largeText = presenceText(media.album) || presenceText(resolveText(config.largeImageText, textContext));
+  const textContext = discreet ? { now, ...context } : { now, media, ...context };
+  const album = discreet ? "" : presenceText(media.album);
+  const largeText = album || presenceText(resolveText(config.largeImageText, textContext));
   if (largeText) assets.large_text = largeText;
   const smallImage = String(config.smallImageKey || "").trim();
   if (smallImage) {

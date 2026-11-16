@@ -12,6 +12,7 @@
   ];
   const MUSIC_QUERY_LIMIT = 100;
   const MAX_BUTTON_URL = 512;
+  const STATUS_DISPLAY_TYPES = { name: 0, state: 1, details: 2 };
 
   const PLAYERS = [
     [/spotify/i, "Spotify", "spotify.com", "spotify"],
@@ -156,11 +157,22 @@
     return { label: target.label, url };
   }
 
+  function statusDisplayType(choice, activity) {
+    const type = STATUS_DISPLAY_TYPES[choice];
+    return type && activity?.[choice] ? type : undefined;
+  }
+
+  function discreetTitle(media) {
+    return media?.video ? "Vídeo" : "Música";
+  }
+
   return {
+    discreetTitle,
     musicButton,
     parseClock,
     playerInfo,
     resolveText,
+    statusDisplayType,
     timerTimestamps,
     usesClockVariables,
     usesMediaVariables
