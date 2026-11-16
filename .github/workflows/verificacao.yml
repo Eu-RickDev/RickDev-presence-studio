@@ -1,0 +1,39 @@
+# Confere os scripts em cada PR e em cada push na main.
+name: Verificação
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      - name: Sintaxe dos scripts
+        run: git ls-files 'src/*.js' | xargs -n 1 node --check
+
+      - name: Carregar os módulos
+        run: >
+          node -e "['config', 'activity', 'media', 'artwork', 'automation', 'updater', 'tray', 'startup', 'version', 'renderer/presence-format']
+          .forEach((name) => require('./src/' + name))"
+
+      # Roda só quando a pasta test/ estiver no repositório.
+      - name: Testes
+        if: hashFiles('test/**/*.test.js') != ''
+        run: npm test
