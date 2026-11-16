@@ -2,357 +2,399 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; base-uri 'none'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; font-src 'self'; base-uri 'none'; form-action 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RickDev Presence Studio</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="presence-format.js"></script>
   </head>
   <body>
-    <div class="ambient ambient-one"></div>
-    <div class="ambient ambient-two"></div>
-
-    <header class="app-header">
-      <div class="brand-mark"><img src="../../build/icon.png" alt=""></div>
-      <div>
-        <div class="brand-title">
-          <strong>RickDev Presence Studio</strong>
-          <span class="version-badge" id="appVersion" title="Versão em uso" hidden></span>
-        </div>
-        <span>Discord Rich Presence</span>
-      </div>
-      <div class="connection-pill" id="statusPill">
-        <i></i>
-        <span id="statusText">Desconectado</span>
-      </div>
-      <button class="icon-button" id="settingsButton" type="button" aria-label="Preferências" aria-haspopup="dialog" aria-expanded="false" title="Preferências">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>
-      </button>
+    <header class="titlebar">
+      <img class="brand-mark" src="../../build/icon.png" alt="">
+      <strong>RickDev Presence Studio</strong>
+      <span class="version" id="appVersion" title="Versão em uso" hidden></span>
     </header>
 
-    <main>
-      <section class="editor-panel">
-        <div class="section-heading">
-          <div>
-            <span class="eyebrow">CONFIGURAÇÃO</span>
-            <h1>Construa sua presence.</h1>
-          </div>
-          <button class="ghost-button" id="resetButton" type="button">Limpar</button>
+    <div class="app">
+      <nav class="sidebar" aria-label="Perfis">
+        <span class="sidebar-label">Perfis <span class="info" tabindex="0" data-tip="Alterne entre configurações salvas. O ponto aceso marca o perfil que está no ar. Use Importar e Exportar para fazer backup dos perfis ou levá-los para outro computador."></span></span>
+        <div class="profile-list" id="profileTabs">
+          <button type="button" data-profile="0">Perfil 1</button>
+          <button type="button" data-profile="1">Perfil 2</button>
+          <button type="button" data-profile="2">Perfil 3</button>
+          <button type="button" data-profile="3">Perfil 4</button>
+          <button type="button" data-profile="4">Perfil 5</button>
         </div>
 
-        <div class="editor-tabs" id="editorTabs">
-          <button type="button" data-tab="presence" class="active">Presence</button>
-          <button type="button" data-tab="media">Modo de mídia</button>
+        <div class="sidebar-group">
+          <button class="nav-button" id="importProfilesButton" type="button"><i class="icon icon-import"></i>Importar perfis</button>
+          <button class="nav-button" id="exportProfilesButton" type="button"><i class="icon icon-export"></i>Exportar perfis</button>
         </div>
 
-        <div class="tab-content" id="tabPresence">
-        <section class="profiles-panel">
-          <div class="profiles-heading">
-            <div>
-              <span class="eyebrow">PERFIS</span>
-              <p>Alterne entre configurações salvas.</p>
-            </div>
-            <label class="profile-name-field">
-              <span>Nome do perfil</span>
-              <input id="profileName" maxlength="24" placeholder="Nome do perfil">
-            </label>
-          </div>
-          <div class="profile-tabs" id="profileTabs">
-            <button type="button" data-profile="0">Perfil 1</button>
-            <button type="button" data-profile="1">Perfil 2</button>
-            <button type="button" data-profile="2">Perfil 3</button>
-            <button type="button" data-profile="3">Perfil 4</button>
-            <button type="button" data-profile="4">Perfil 5</button>
-          </div>
-          <div class="profile-transfer">
-            <span>Faça backup dos perfis ou leve-os para outro computador.</span>
-            <div>
-              <button class="ghost-button" id="importProfilesButton" type="button">Importar perfis</button>
-              <button class="ghost-button" id="exportProfilesButton" type="button">Exportar perfis</button>
-            </div>
-          </div>
-        </section>
-
-        <form id="presenceForm">
-          <fieldset>
-            <legend>Aplicativo Discord</legend>
-            <label class="full">
-              <span>Application ID <b>*</b></span>
-              <input id="clientId" name="clientId" inputmode="numeric" maxlength="20" placeholder="Ex: 123456789012345678">
-              <small>Crie um app no Discord Developer Portal e cole o ID aqui.</small>
-            </label>
-            <label class="full">
-              <span>Tipo de atividade</span>
-              <select id="activityType" name="activityType">
-                <option value="playing" selected>Jogando</option>
-                <option value="listening">Ouvindo</option>
-                <option value="watching">Assistindo</option>
-                <option value="competing">Competindo em</option>
-              </select>
-              <small>É o verbo que aparece antes do nome do app no Discord, como em "Assistindo RickDev".</small>
-            </label>
-          </fieldset>
-
-          <fieldset>
-            <legend>Textos</legend>
-            <label>
-              <span>Detalhes</span>
-              <input id="details" name="details" maxlength="128" placeholder="O que você está fazendo?">
-            </label>
-            <label>
-              <span>Estado</span>
-              <input id="state" name="state" maxlength="128" placeholder="Uma descrição complementar">
-            </label>
-
-            <label class="toggle-row full inner-toggle">
-              <div>
-                <strong>Alternar textos</strong>
-                <span>Reveza os detalhes e o estado acima com as variações abaixo. Variações vazias são ignoradas.</span>
-              </div>
-              <input id="rotateTexts" name="rotateTexts" type="checkbox">
-              <i></i>
-            </label>
-
-            <div class="rotation-fields" id="rotationFields" hidden>
-              <label>
-                <span>Detalhes 2</span>
-                <input name="details2" maxlength="128" placeholder="Outra frase principal">
-              </label>
-              <label>
-                <span>Estado 2</span>
-                <input name="state2" maxlength="128" placeholder="Outra descrição">
-              </label>
-              <label>
-                <span>Detalhes 3</span>
-                <input name="details3" maxlength="128" placeholder="Opcional">
-              </label>
-              <label>
-                <span>Estado 3</span>
-                <input name="state3" maxlength="128" placeholder="Opcional">
-              </label>
-              <label>
-                <span>Detalhes 4</span>
-                <input name="details4" maxlength="128" placeholder="Opcional">
-              </label>
-              <label>
-                <span>Estado 4</span>
-                <input name="state4" maxlength="128" placeholder="Opcional">
-              </label>
-              <label>
-                <span>Trocar a cada</span>
-                <select name="rotationInterval">
-                  <option value="15">15 segundos</option>
-                  <option value="30" selected>30 segundos</option>
-                  <option value="60">1 minuto</option>
-                  <option value="120">2 minutos</option>
-                  <option value="300">5 minutos</option>
-                </select>
-              </label>
-            </div>
-          </fieldset>
-
-          <fieldset>
-            <legend>Imagens</legend>
-            <label>
-              <span>Imagem grande</span>
-              <input id="largeImageKey" name="largeImageKey" maxlength="256" placeholder="Chave do asset ou link https://">
-            </label>
-            <label>
-              <span>Texto da imagem grande</span>
-              <input id="largeImageText" name="largeImageText" maxlength="128" placeholder="Aparece ao passar o mouse">
-            </label>
-            <label>
-              <span>Imagem pequena</span>
-              <input id="smallImageKey" name="smallImageKey" maxlength="256" placeholder="Chave do asset ou link https://">
-            </label>
-            <label>
-              <span>Texto da imagem pequena</span>
-              <input id="smallImageText" name="smallImageText" maxlength="128" placeholder="Aparece ao passar o mouse">
-            </label>
-            <p class="field-note">Use a chave de um asset de Rich Presence Assets no Developer Portal ou o link direto de uma imagem (https://... terminado em .png, .jpg, .gif ou .webp).</p>
-          </fieldset>
-
-          <fieldset>
-            <legend>Botões</legend>
-            <label>
-              <span>Botão 1</span>
-              <input id="button1Label" name="button1Label" maxlength="32" placeholder="Ex: Ver portfólio">
-            </label>
-            <label>
-              <span>URL do botão 1</span>
-              <input id="button1Url" name="button1Url" type="url" maxlength="512" placeholder="https://...">
-            </label>
-            <label>
-              <span>Botão 2</span>
-              <input id="button2Label" name="button2Label" maxlength="32" placeholder="Ex: Entrar no Discord">
-            </label>
-            <label>
-              <span>URL do botão 2</span>
-              <input id="button2Url" name="button2Url" type="url" maxlength="512" placeholder="https://...">
-            </label>
-            <p class="field-note">Preencha o texto e a URL juntos. No Discord, teste os botões visualizando seu perfil por outra conta.</p>
-          </fieldset>
-
-          <label class="toggle-row">
-            <div>
-              <strong>Mostrar tempo decorrido</strong>
-              <span>Inicia o cronômetro ao ativar a presence.</span>
-            </div>
-            <input id="showTimer" name="showTimer" type="checkbox">
-            <i></i>
-          </label>
-
-          <label class="toggle-row priority-toggle">
-            <div>
-              <strong>Alta prioridade</strong>
-              <span>Reaplica esta presence a cada 60 segundos caso outro aplicativo a substitua, preservando o tempo decorrido.</span>
-            </div>
-            <input id="highPriority" name="highPriority" type="checkbox">
-            <i></i>
-          </label>
-        </form>
+        <div class="sidebar-footer">
+          <button class="nav-button" id="settingsButton" type="button" aria-haspopup="dialog" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            Preferências
+          </button>
         </div>
+      </nav>
 
-        <div class="tab-content" id="tabMedia" hidden>
-          <section class="music-panel">
-            <div class="music-options">
-              <label class="toggle-row music-toggle">
-                <div>
-                  <strong>Modo de mídia</strong>
-                  <span>Mostra a mídia em reprodução no momento. Enquanto nenhuma mídia estiver tocando, retoma a presence configurada. Vale para este perfil.</span>
+      <main class="workspace">
+        <div class="workspace-grid">
+          <section class="editor-panel">
+            <div class="editor-head">
+              <label class="title-field">
+                <span>Nome do perfil</span>
+                <input id="profileName" maxlength="24" placeholder="Nome do perfil" spellcheck="false">
+              </label>
+              <button class="ghost-button" id="resetButton" type="button">Limpar perfil</button>
+            </div>
+
+            <div class="segmented" id="editorTabs">
+              <button type="button" data-tab="presence" class="active">Presence</button>
+              <button type="button" data-tab="media">Modo de mídia</button>
+            </div>
+
+            <div class="tab-content" id="tabPresence">
+              <form id="presenceForm">
+                <fieldset class="card">
+                  <legend>Aplicativo Discord</legend>
+                  <label class="full">
+                    <span>Application ID <b>*</b> <span class="info" tabindex="0" data-tip="Crie um app no Discord Developer Portal e cole o ID aqui."></span></span>
+                    <input id="clientId" name="clientId" inputmode="numeric" maxlength="20" placeholder="Ex: 123456789012345678">
+                  </label>
+                  <label class="full">
+                    <span>Tipo de atividade <span class="info" tabindex="0" data-tip="É o verbo que aparece antes do nome do app no Discord, como em “Assistindo RickDev”."></span></span>
+                    <select id="activityType" name="activityType">
+                      <option value="playing" selected>Jogando</option>
+                      <option value="listening">Ouvindo</option>
+                      <option value="watching">Assistindo</option>
+                      <option value="competing">Competindo em</option>
+                    </select>
+                  </label>
+                </fieldset>
+
+                <fieldset class="card">
+                  <legend>Textos</legend>
+                  <label>
+                    <span>Detalhes</span>
+                    <input id="details" name="details" maxlength="128" placeholder="O que você está fazendo">
+                  </label>
+                  <label>
+                    <span>Estado</span>
+                    <input id="state" name="state" maxlength="128" placeholder="Uma descrição complementar">
+                  </label>
+                  <div class="variable-bar full" id="variableBar">
+                    <div class="variable-head">
+                      <button type="button" class="variable-toggle" id="variableToggle" aria-expanded="false" aria-controls="variableList">
+                        Variáveis
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                      </button>
+                      <span class="info" tabindex="0" data-tip="Clique numa variável para inseri-la no campo de texto em que você estava. A hora, a data e o dia se atualizam sozinhos. Música e artista mostram o que está tocando, e o texto que usa essas duas fica oculto quando nada toca."></span>
+                    </div>
+                    <div class="variable-list" id="variableList" hidden>
+                      <button type="button" data-variable="{hora}" data-tip="Hora atual, como 14:35">{hora}</button>
+                      <button type="button" data-variable="{data}" data-tip="Data de hoje, como 15/11/2026">{data}</button>
+                      <button type="button" data-variable="{dia}" data-tip="Dia da semana, como sábado">{dia}</button>
+                      <button type="button" data-variable="{perfil}" data-tip="Nome do perfil ativo">{perfil}</button>
+                      <button type="button" data-variable="{música}" data-tip="Título da mídia tocando">{música}</button>
+                      <button type="button" data-variable="{artista}" data-tip="Artista da mídia tocando">{artista}</button>
+                    </div>
+                  </div>
+
+                  <label class="toggle-row full inner-toggle">
+                    <div>
+                      <strong>Alternar textos <span class="info" tabindex="0" data-tip="Reveza os detalhes e o estado acima com as variações abaixo. Variações vazias são ignoradas."></span></strong>
+                    </div>
+                    <input id="rotateTexts" name="rotateTexts" type="checkbox">
+                    <i></i>
+                  </label>
+
+                  <div class="rotation-fields" id="rotationFields" hidden>
+                    <label>
+                      <span>Detalhes 2</span>
+                      <input name="details2" maxlength="128" placeholder="Outra frase principal">
+                    </label>
+                    <label>
+                      <span>Estado 2</span>
+                      <input name="state2" maxlength="128" placeholder="Outra descrição">
+                    </label>
+                    <label>
+                      <span>Detalhes 3</span>
+                      <input name="details3" maxlength="128" placeholder="Opcional">
+                    </label>
+                    <label>
+                      <span>Estado 3</span>
+                      <input name="state3" maxlength="128" placeholder="Opcional">
+                    </label>
+                    <label>
+                      <span>Detalhes 4</span>
+                      <input name="details4" maxlength="128" placeholder="Opcional">
+                    </label>
+                    <label>
+                      <span>Estado 4</span>
+                      <input name="state4" maxlength="128" placeholder="Opcional">
+                    </label>
+                    <label>
+                      <span>Trocar a cada</span>
+                      <select name="rotationInterval">
+                        <option value="15">15 segundos</option>
+                        <option value="30" selected>30 segundos</option>
+                        <option value="60">1 minuto</option>
+                        <option value="120">2 minutos</option>
+                        <option value="300">5 minutos</option>
+                      </select>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <fieldset class="card">
+                  <legend>Imagens <span class="info" tabindex="0" data-tip="Use a chave de um asset de Rich Presence Assets no Developer Portal ou o link direto de uma imagem (https://... terminado em .png, .jpg, .gif ou .webp)."></span></legend>
+                  <label>
+                    <span>Imagem grande</span>
+                    <input id="largeImageKey" name="largeImageKey" maxlength="256" placeholder="Chave do asset ou link https://">
+                  </label>
+                  <label>
+                    <span>Texto da imagem grande</span>
+                    <input id="largeImageText" name="largeImageText" maxlength="128" placeholder="Aparece ao passar o mouse">
+                  </label>
+                  <label>
+                    <span>Imagem pequena</span>
+                    <input id="smallImageKey" name="smallImageKey" maxlength="256" placeholder="Chave do asset ou link https://">
+                  </label>
+                  <label>
+                    <span>Texto da imagem pequena</span>
+                    <input id="smallImageText" name="smallImageText" maxlength="128" placeholder="Aparece ao passar o mouse">
+                  </label>
+                </fieldset>
+
+                <fieldset class="card">
+                  <legend>Botões <span class="info" tabindex="0" data-tip="Preencha o texto e a URL juntos. No Discord, teste os botões visualizando seu perfil por outra conta."></span></legend>
+                  <label>
+                    <span>Botão 1</span>
+                    <input id="button1Label" name="button1Label" maxlength="32" placeholder="Ex: Ver portfólio">
+                  </label>
+                  <label>
+                    <span>URL do botão 1</span>
+                    <input id="button1Url" name="button1Url" type="url" maxlength="512" placeholder="https://...">
+                  </label>
+                  <label>
+                    <span>Botão 2</span>
+                    <input id="button2Label" name="button2Label" maxlength="32" placeholder="Ex: Entrar no Discord">
+                  </label>
+                  <label>
+                    <span>URL do botão 2</span>
+                    <input id="button2Url" name="button2Url" type="url" maxlength="512" placeholder="https://...">
+                  </label>
+                </fieldset>
+
+                <div class="card list-card">
+                  <label class="toggle-row">
+                    <div>
+                      <strong>Mostrar cronômetro <span class="info" tabindex="0" data-tip="Conta o tempo desde a ativação ou desde um horário, ou faz uma contagem regressiva até um horário."></span></strong>
+                    </div>
+                    <input id="showTimer" name="showTimer" type="checkbox">
+                    <i></i>
+                  </label>
+                  <div class="timer-fields" id="timerFields">
+                    <label>
+                      <span>Contar <span class="info" id="timerModeInfo" tabindex="0" data-tip=""></span></span>
+                      <select id="timerMode" name="timerMode">
+                        <option value="elapsed" selected>Desde a ativação</option>
+                        <option value="since">Desde um horário</option>
+                        <option value="until">Regressivo até um horário</option>
+                      </select>
+                    </label>
+                    <label id="timerTimeField">
+                      <span>Horário</span>
+                      <input id="timerTime" name="timerTime" type="time">
+                    </label>
+                  </div>
+                  <label class="toggle-row">
+                    <div>
+                      <strong>Alta prioridade <span class="info" tabindex="0" data-tip="Reaplica esta presence a cada 60 segundos caso outro aplicativo a substitua, preservando o tempo decorrido."></span></strong>
+                    </div>
+                    <input id="highPriority" name="highPriority" type="checkbox">
+                    <i></i>
+                  </label>
                 </div>
-                <input id="musicMode" name="musicMode" type="checkbox">
+              </form>
+            </div>
+
+            <div class="tab-content" id="tabMedia" hidden>
+              <div class="card list-card music-options">
+                <label class="toggle-row">
+                  <div>
+                    <strong>Modo de mídia <span class="info" tabindex="0" data-tip="Mostra a mídia em reprodução no momento. Enquanto nenhuma mídia estiver tocando, retoma a presence configurada. Vale para este perfil."></span></strong>
+                  </div>
+                  <input id="musicMode" name="musicMode" type="checkbox">
+                  <i></i>
+                </label>
+
+                <label class="toggle-row">
+                  <div>
+                    <strong>Buscar capa do álbum <span class="info" tabindex="0" data-tip="Procura a capa e o nome do álbum no iTunes e, se não encontrar, no Deezer, usando o título e o artista da faixa. Desligado, nada é enviado a esses serviços e a imagem grande do perfil é usada. Vale para todos os perfis."></span></strong>
+                  </div>
+                  <input id="musicCoverLookup" type="checkbox">
+                  <i></i>
+                </label>
+
+                <label class="toggle-row">
+                  <div>
+                    <strong>Ícone do player <span class="info" tabindex="0" data-tip="Mostra na imagem pequena o ícone do Spotify, YouTube Music, Deezer e outros players conhecidos, quando o perfil não tem imagem pequena. Vale para este perfil."></span></strong>
+                  </div>
+                  <input id="musicPlayerIcon" name="musicPlayerIcon" type="checkbox">
+                  <i></i>
+                </label>
+
+                <label class="toggle-row">
+                  <div>
+                    <strong>Mostrar como Jogando <span class="info" tabindex="0" data-tip="Envia a mídia como Jogando no lugar de Ouvindo ou Assistindo. O Discord só mostra o ícone do aplicativo ao lado do seu nome na call quando a atividade é Jogando. Vale para este perfil."></span></strong>
+                  </div>
+                  <input id="musicAsPlaying" name="musicAsPlaying" type="checkbox">
+                  <i></i>
+                </label>
+
+                <label class="toggle-row">
+                  <div>
+                    <strong>Nome do player na atividade <span class="info" tabindex="0" data-tip="Mostra o nome do player no lugar do nome do aplicativo, como Ouvindo YouTube Music ou Ouvindo Spotify. Com um player desconhecido, fica o nome do aplicativo. Vale para este perfil."></span></strong>
+                  </div>
+                  <input id="musicPlayerName" name="musicPlayerName" type="checkbox">
+                  <i></i>
+                </label>
+
+                <label class="setting-row">
+                  <div>
+                    <strong>Botão da música <span class="info" tabindex="0" data-tip="Um botão para quem vê seu perfil abrir a faixa. Ele vem primeiro e ocupa o lugar do botão 2 do perfil. Automático usa o serviço do player e, se ele não for conhecido, o link achado na busca da capa ou o YouTube Music. Vale para este perfil."></span></strong>
+                  </div>
+                  <select id="musicButton" name="musicButton">
+                    <option value="off" selected>Sem botão</option>
+                    <option value="auto">Automático</option>
+                    <option value="youtube">YouTube Music</option>
+                    <option value="spotify">Spotify</option>
+                    <option value="deezer">Deezer</option>
+                    <option value="apple">Apple Music</option>
+                  </select>
+                </label>
+              </div>
+
+              <h2 class="section-title">Fontes <span class="info" tabindex="0" data-tip="Escolha quais aplicativos podem alimentar o modo de mídia e quais mostram vídeo. Uma fonte marcada como vídeo aparece como Assistindo, sem busca de capa nem botão da música. Vídeos de players como o VLC são reconhecidos sozinhos, mas os navegadores informam tudo como música."></span></h2>
+              <div class="card list-card music-sources" id="musicSources"></div>
+            </div>
+          </section>
+
+          <aside class="preview-column">
+            <div class="preview-sticky">
+              <span class="section-label">Pré-visualização</span>
+              <div class="discord-card">
+                <span class="card-mode" id="previewMode">Jogando</span>
+                <div class="activity">
+                  <div class="asset-preview">
+                    <div class="asset-placeholder" id="largeAsset">
+                      <img id="largeAssetImage" alt="">
+                      <span id="largeAssetFallback">R</span>
+                    </div>
+                    <div class="small-asset" id="smallAsset">
+                      <img id="smallAssetImage" alt="">
+                    </div>
+                  </div>
+                  <div class="activity-copy">
+                    <strong id="previewApp">Seu aplicativo</strong>
+                    <span id="previewDetails">Criando algo incrível</span>
+                    <span id="previewState">No RickDev Presence Studio</span>
+                    <span class="timer" id="previewTimer">00:00 decorrido</span>
+                    <div class="music-progress" id="musicProgress">
+                      <div class="music-progress-bar"><i id="musicProgressFill"></i></div>
+                      <div class="music-progress-times">
+                        <span id="musicElapsed">0:00</span>
+                        <span id="musicDuration">0:00</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="preview-buttons" id="previewButtons"></div>
+              </div>
+
+              <div class="preview-notes">
+                <span id="previewRotation"></span>
+                <span id="musicHint"></span>
+              </div>
+
+              <div class="actions">
+                <button class="primary-button" id="connectButton" type="button">
+                  <i class="icon icon-broadcast"></i>
+                  <span>Ativar presence</span>
+                </button>
+                <button class="secondary-button" id="disconnectButton" type="button">Desconectar</button>
+              </div>
+
+              <div class="connection-pill" id="statusPill">
+                <i></i>
+                <span id="statusText">Desconectado</span>
+              </div>
+
+              <div class="guide-card">
+                <h3>Primeiros passos</h3>
+                <ol>
+                  <li>Crie um aplicativo no Developer Portal</li>
+                  <li>Adicione imagens em Rich Presence Assets</li>
+                  <li>Abra o Discord desktop e ative sua presence</li>
+                </ol>
+                <a href="#" id="portalLink">Abrir o Developer Portal <i class="icon icon-external"></i></a>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <div class="modal-overlay" id="settingsModal" aria-hidden="true">
+      <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <header class="modal-header">
+          <button class="modal-close" id="settingsCloseButton" type="button" aria-label="Fechar"><i class="icon icon-close"></i></button>
+          <span class="modal-kicker">Valem para todos os perfis</span>
+          <h2 id="settingsTitle">Preferências</h2>
+        </header>
+        <div class="modal-body">
+          <section class="settings-section">
+            <h3 class="section-title">Inicialização <span class="info" tabindex="0" data-tip="Inicialização e conexão com o Discord."></span></h3>
+            <div class="card list-card startup-options">
+              <label class="toggle-row">
+                <div>
+                  <strong>Iniciar com o Windows <span class="info" tabindex="0" data-tip="Cria uma cópia gerenciada no LocalAppData e inicia o Studio minimizado. Mover ou renomear o arquivo original não interrompe a inicialização."></span></strong>
+                </div>
+                <input id="startWithWindows" type="checkbox">
                 <i></i>
               </label>
 
               <label class="toggle-row">
                 <div>
-                  <strong>Buscar capa do álbum</strong>
-                  <span>Procura a capa e o nome do álbum no iTunes e, se não encontrar, no Deezer, usando o título e o artista da faixa. Desligado, nada é enviado a esses serviços e a imagem grande do perfil é usada. Vale para todos os perfis.</span>
+                  <strong>Ativar presence ao iniciar <span class="info" tabindex="0" data-tip="Ativa o perfil selecionado quando o Studio abrir. Se o Discord ainda não estiver pronto, aguarda e tenta novamente em intervalos seguros."></span></strong>
                 </div>
-                <input id="musicCoverLookup" type="checkbox">
+                <input id="autoStartPresence" type="checkbox">
+                <i></i>
+              </label>
+
+              <label class="toggle-row">
+                <div>
+                  <strong>Reconectar automaticamente <span class="info" tabindex="0" data-tip="Se o Discord fechar ou reiniciar com a presence ativa, o Studio reconecta sozinho e mantém o tempo decorrido."></span></strong>
+                </div>
+                <input id="autoReconnect" type="checkbox">
                 <i></i>
               </label>
             </div>
-
-            <div class="music-panel-heading">
-              <span class="eyebrow">FONTES</span>
-              <p>Escolha quais aplicativos podem alimentar o modo de mídia.</p>
-            </div>
-            <div class="music-sources" id="musicSources"></div>
+            <p class="startup-status" id="startupStatus"></p>
           </section>
-        </div>
-      </section>
 
-      <aside class="preview-column">
-        <div class="sticky">
-          <span class="eyebrow">PRÉ-VISUALIZAÇÃO</span>
-          <div class="discord-card">
-            <div class="card-topline">
-              <strong id="previewMode">JOGANDO</strong>
-              <span>RICH PRESENCE</span>
-            </div>
-            <div class="activity">
-              <div class="asset-preview">
-                <div class="asset-placeholder" id="largeAsset">
-                  <img id="largeAssetImage" alt="">
-                  <span id="largeAssetFallback">R</span>
-                </div>
-                <div class="small-asset" id="smallAsset">
-                  <img id="smallAssetImage" alt="">
-                  <span>&#9679;</span>
-                </div>
-              </div>
-              <div class="activity-copy">
-                <strong id="previewApp">Seu aplicativo</strong>
-                <span id="previewDetails">Criando algo incrível</span>
-                <span id="previewState">No RickDev Presence Studio</span>
-                <span class="timer" id="previewTimer">00:00 decorrido</span>
-                <span class="rotation-hint" id="previewRotation"></span>
-                <div class="music-progress" id="musicProgress">
-                  <div class="music-progress-bar"><i id="musicProgressFill"></i></div>
-                  <div class="music-progress-times">
-                    <span id="musicElapsed">0:00</span>
-                    <span id="musicDuration">0:00</span>
-                  </div>
-                </div>
-                <span class="music-hint" id="musicHint"></span>
-              </div>
-            </div>
-            <div class="preview-buttons" id="previewButtons"></div>
-          </div>
-
-          <div class="actions">
-            <button class="primary-button" id="connectButton" type="button">
-              <span>Ativar presence</span>
-              <i>↗</i>
-            </button>
-            <button class="secondary-button" id="disconnectButton" type="button">Desconectar</button>
-          </div>
-
-          <div class="guide-card">
-            <span>PRIMEIROS PASSOS</span>
-            <ol>
-              <li>Crie um aplicativo no Developer Portal.</li>
-              <li>Adicione imagens em Rich Presence Assets.</li>
-              <li>Abra o Discord desktop e ative sua presence.</li>
-            </ol>
-            <a href="#" id="portalLink">Abrir Discord Developer Portal ↗</a>
-          </div>
-        </div>
-      </aside>
-    </main>
-
-    <div class="modal-overlay" id="settingsModal" aria-hidden="true">
-      <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-        <header class="modal-header">
-          <button class="modal-close" id="settingsCloseButton" type="button" aria-label="Fechar">&times;</button>
-          <span class="eyebrow">CONFIGURAÇÕES</span>
-          <h2 id="settingsTitle">Preferências</h2>
-        </header>
-        <div class="modal-body">
-          <p class="modal-subtitle">Inicialização e conexão com o Discord. Valem para todos os perfis.</p>
-
-          <div class="startup-options">
-            <label class="toggle-row">
-              <div>
-                <strong>Iniciar com o Windows</strong>
-                <span>Cria uma cópia gerenciada no LocalAppData e inicia o Studio minimizado. Mover ou renomear o arquivo original não interrompe a inicialização.</span>
-              </div>
-              <input id="startWithWindows" type="checkbox">
-              <i></i>
-            </label>
-
-            <label class="toggle-row">
-              <div>
-                <strong>Ativar presence ao iniciar</strong>
-                <span>Ativa o perfil selecionado quando o Studio abrir. Se o Discord ainda não estiver pronto, aguarda e tenta novamente em intervalos seguros.</span>
-              </div>
-              <input id="autoStartPresence" type="checkbox">
-              <i></i>
-            </label>
-
-            <label class="toggle-row">
-              <div>
-                <strong>Reconectar automaticamente</strong>
-                <span>Se o Discord fechar ou reiniciar com a presence ativa, o Studio reconecta sozinho e mantém o tempo decorrido.</span>
-              </div>
-              <input id="autoReconnect" type="checkbox">
-              <i></i>
-            </label>
-          </div>
-          <p class="startup-status" id="startupStatus"></p>
-
-          <div class="settings-section">
-            <span class="eyebrow">AUSENTE</span>
-            <p class="modal-subtitle">Conta como ausente quem fica sem usar o mouse e o teclado pelo tempo escolhido ou bloqueia a tela. Ao voltar, a presence anterior é restaurada com o mesmo tempo decorrido.</p>
-            <div class="startup-options">
+          <section class="settings-section">
+            <h3 class="section-title">Ausente <span class="info" tabindex="0" data-tip="Conta como ausente quem fica sem usar o mouse e o teclado pelo tempo escolhido ou bloqueia a tela. Ao voltar, a presence anterior é restaurada com o mesmo tempo decorrido."></span></h3>
+            <div class="card list-card">
               <label class="setting-row">
                 <div>
-                  <strong>Quando estiver ausente</strong>
-                  <span>Mídia tocando no modo de mídia também conta como presença.</span>
+                  <strong>Quando estiver ausente <span class="info" tabindex="0" data-tip="Mídia tocando no modo de mídia também conta como presença."></span></strong>
                 </div>
                 <select id="awayAction">
                   <option value="off">Não mudar nada</option>
@@ -366,8 +408,7 @@
               </label>
               <label class="setting-row">
                 <div>
-                  <strong>Considerar ausente após</strong>
-                  <span>Tempo sem usar o mouse e o teclado.</span>
+                  <strong>Considerar ausente após <span class="info" tabindex="0" data-tip="Tempo sem usar o mouse e o teclado."></span></strong>
                 </div>
                 <select id="awayMinutes">
                   <option value="5">5 minutos</option>
@@ -378,7 +419,14 @@
                 </select>
               </label>
             </div>
-          </div>
+          </section>
+
+          <section class="settings-section">
+            <h3 class="section-title">Automação <span class="info" tabindex="0" data-tip="Troca o perfil sozinho quando um programa está aberto ou em um horário. Vale a primeira regra da lista que estiver valendo, e o perfil anterior volta quando nenhuma vale mais. Se você trocar de perfil por conta própria, sua escolha fica até a próxima mudança. Só funciona com a presence ativa."></span></h3>
+            <div class="automation-rules" id="automationRules"></div>
+            <button class="ghost-button add-rule" id="addRuleButton" type="button"><i class="icon icon-plus"></i>Adicionar regra</button>
+            <datalist id="processList"></datalist>
+          </section>
         </div>
       </section>
     </div>
@@ -386,18 +434,23 @@
     <div class="modal-overlay" id="updateModal" aria-hidden="true">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
         <header class="modal-header">
-          <button class="modal-close" id="updateCloseButton" type="button" aria-label="Fechar">&times;</button>
-          <span class="eyebrow">NOVA VERSÃO DISPONÍVEL</span>
+          <button class="modal-close" id="updateCloseButton" type="button" aria-label="Fechar"><i class="icon icon-close"></i></button>
+          <span class="modal-kicker">Nova versão disponível</span>
           <h2 id="updateTitle">Atualização do RickDev Presence Studio</h2>
         </header>
         <div class="modal-body">
           <div class="update-version" id="updateVersion"></div>
           <div class="update-notes" id="updateNotes"></div>
+          <div class="update-progress" id="updateProgress" hidden>
+            <div class="music-progress-bar"><i id="updateProgressFill"></i></div>
+            <span id="updateProgressText">Preparando o download</span>
+          </div>
           <div class="update-actions">
             <button class="secondary-button" id="updateLaterButton" type="button">Agora não</button>
-            <button class="primary-button" id="updateOpenButton" type="button">
-              <span>Abrir no GitHub</span>
-              <i>&#8599;</i>
+            <button class="secondary-button" id="updateOpenButton" type="button">Abrir no GitHub <i class="icon icon-external"></i></button>
+            <button class="primary-button" id="updateInstallButton" type="button" hidden>
+              <i class="icon icon-download"></i>
+              <span>Atualizar agora</span>
             </button>
           </div>
         </div>

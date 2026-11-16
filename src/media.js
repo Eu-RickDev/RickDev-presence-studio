@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const { playerInfo, resolveText } = require("./renderer/presence-format");
 
 const PAUSE_GRACE_MS = 30 * 1000;
 const SEEK_TOLERANCE_MS = 5000;
@@ -8,6 +9,29 @@ const MAX_FAST_FAILURES = 3;
 const MAX_DURATION_MS = 24 * 60 * 60 * 1000;
 const MAX_UNIX_TIMESTAMP_MS = 2147483647000;
 const NON_BREAKING_SPACE = String.fromCharCode(160);
+const BROWSER_APPS = ["chrome", "msedge", "opera", "brave", "vivaldi", "firefox", "yandex", "arc"];
+const BROWSER_APP = new RegExp(`^(${BROWSER_APPS.join("|")})\.exe$`, "i");
+const WINDOW_TITLES_TYPE = [
+  "using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;",
+  "public static class RickDevWindows {",
+  "delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);",
+  "[DllImport(\"user32.dll\")] static extern bool EnumWindows(EnumProc callback, IntPtr lParam);",
+  "[DllImport(\"user32.dll\")] static extern bool IsWindowVisible(IntPtr hWnd);",
+  "[DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);",
+  "[DllImport(\"user32.dll\")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);",
+  "public static string[] Titles(int[] processIds) {",
+  "var wanted = new HashSet<uint>(); foreach (var id in processIds) wanted.Add((uint)id);",
+  "var titles = new List<string>();",
+  "EnumWindows((hWnd, lParam) => {",
+  "uint processId; GetWindowThreadProcessId(hWnd, out processId);",
+  "if (wanted.Contains(processId) && IsWindowVisible(hWnd)) {",
+  "var text = new StringBuilder(512); if (GetWindowText(hWnd, text, text.Capacity) > 0) titles.Add(text.ToString());",
+  "}",
+  "return true;",
+  "}, IntPtr.Zero);",
+  "return titles.ToArray();",
+  "} }"
+].join(" ");
 
 // Windows exposes whatever is playing (Spotify, browsers, media players) through
 // the Global System Media Transport Controls API. WinRT is not reachable from
@@ -25,6 +49,16 @@ const WATCHER_SCRIPT = [
   "  $netTask.Result",
   "}",
   "$manager = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])",
+  "$windowTitles = $false",
+  `try { Add-Type -TypeDefinition '${WINDOW_TITLES_TYPE}'; $windowTitles = $true } catch { }`,
+  "function Window-Titles($app) {",
+  `  if (-not $windowTitles -or $app -notmatch '^(${BROWSER_APPS.join("|")})\.exe$') { return @() }`,
+  "  try {",
+  "    $ids = @(Get-Process -Name ($app -replace '\.exe$', '') -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })",
+  "    if ($ids.Count -eq 0) { return @() }",
+  "    return [RickDevWindows]::Titles([int[]]$ids)",
+  "  } catch { return @() }",
+  "}",
   "$parentPid = 0",
   "if (-not [int]::TryParse([string]$env:RICKDEV_PARENT_PID, [ref]$parentPid)) { $parentPid = 0 }",
   "function Read-MediaSession($session) {",
@@ -36,7 +70,9 @@ const WATCHER_SCRIPT = [
   "    artist = [string]$media.Artist",
   "    album = [string]$media.AlbumTitle",
   "    app = [string]$session.SourceAppUserModelId",
+  "    windows = @(Window-Titles ([string]$session.SourceAppUserModelId))",
   "    status = [string]$playback.PlaybackStatus",
+  "    playbackType = [string]$playback.PlaybackType",
   "    positionMs = [long]($timeline.Position.TotalMilliseconds - $timeline.StartTime.TotalMilliseconds)",
   "    durationMs = [long]($timeline.EndTime.TotalMilliseconds - $timeline.StartTime.TotalMilliseconds)",
   "    updatedAtMs = [long]$timeline.LastUpdatedTime.ToUnixTimeMilliseconds()",
@@ -72,6 +108,22 @@ function parseMediaLine(line) {
   }
 }
 
+function playerFromWindows(app, titles, album = "") {
+  if (!BROWSER_APP.test(app)) return "";
+  const list = Array.isArray(titles) ? titles : titles ? [titles] : [];
+  const found = new Set();
+  for (const title of list) {
+    for (const part of String(title).split(/\s[-–—|•·]\s/)) {
+      const name = part.trim();
+      if (name.toLowerCase() === "youtube") found.add("YouTube");
+      const info = playerInfo(name);
+      if (info && info.name.toLowerCase() === name.toLowerCase()) found.add(info.name);
+    }
+  }
+  if (found.delete("YouTube") && !album) found.delete("YouTube Music");
+  return found.size === 1 ? [...found][0] : "";
+}
+
 function normalizeMediaState(payload, nowMs = Date.now()) {
   if (!payload || payload.active !== true) return { active: false };
 
@@ -96,14 +148,18 @@ function normalizeMediaState(payload, nowMs = Date.now()) {
   }
   if (durationMs > 0) positionMs = Math.min(positionMs, durationMs);
 
+  const album = String(payload.album || "").trim();
+  const app = String(payload.app || "").trim();
   return {
     active: true,
     playing,
     hasTimeline,
     title,
     artist: String(payload.artist || "").trim(),
-    album: String(payload.album || "").trim(),
-    app: String(payload.app || "").trim(),
+    album,
+    app,
+    player: playerFromWindows(app, payload.windows, album),
+    video: payload.playbackType === "Video",
     positionMs,
     durationMs
   };
@@ -148,7 +204,10 @@ function derivePresentation(media, lastPlayingAt, nowMs = Date.now(), graceMs = 
 
 function mediaSignature(presentation, media) {
   if (presentation?.mode !== "music" || !media?.active) return "fallback";
-  return ["music", media.title, media.artist, media.album, presentation.paused ? "paused" : "playing"].join("|");
+  return [
+    media.video ? "video" : "music", media.title, media.artist, media.album, media.app, media.player,
+    presentation.paused ? "paused" : "playing"
+  ].join("|");
 }
 
 function hasSeeked(previous, media, nowMs = Date.now(), toleranceMs = SEEK_TOLERANCE_MS) {
@@ -167,19 +226,26 @@ function presenceText(value) {
 }
 
 // Raw SET_ACTIVITY payload (snake_case) so the activity can carry type 2
-// ("Listening to...") and external image URLs, which discord-rpc does not map.
+// ("Listening to...") or 3 ("Watching...") and external image URLs, which
+// discord-rpc does not map.
 function buildMusicActivity(config, media, options = {}) {
   const {
     paused = false,
     artUrl = "",
+    appIcon = "",
+    playerIcon,
+    activityName = "",
     buttons = [],
     includeType = true,
+    context = {},
     now = Date.now(),
     fallbackStart = now
   } = options;
 
   const activity = { instance: false };
-  if (includeType) activity.type = 2;
+  if (includeType && !config.musicAsPlaying) activity.type = media.video ? 3 : 2;
+  const name = presenceText(activityName);
+  if (name) activity.name = name;
 
   const details = presenceText(media.title);
   if (details) activity.details = details;
@@ -191,14 +257,21 @@ function buildMusicActivity(config, media, options = {}) {
   if (state) activity.state = state;
 
   const assets = {};
-  const largeImage = String(artUrl || "").slice(0, 256) || String(config.largeImageKey || "").trim();
+  const largeImage = String(artUrl || "").slice(0, 256)
+    || String(config.largeImageKey || "").trim()
+    || String(appIcon || "").slice(0, 256);
   if (largeImage) assets.large_image = largeImage;
-  const largeText = presenceText(media.album) || presenceText(config.largeImageText);
+  const textContext = { now, media, ...context };
+  const largeText = presenceText(media.album) || presenceText(resolveText(config.largeImageText, textContext));
   if (largeText) assets.large_text = largeText;
   const smallImage = String(config.smallImageKey || "").trim();
   if (smallImage) {
     assets.small_image = smallImage;
-    const smallText = presenceText(config.smallImageText);
+    const smallText = presenceText(resolveText(config.smallImageText, textContext));
+    if (smallText) assets.small_text = smallText;
+  } else if (playerIcon?.icon) {
+    assets.small_image = playerIcon.icon.slice(0, 256);
+    const smallText = presenceText(playerIcon.name);
     if (smallText) assets.small_text = smallText;
   }
   if (Object.keys(assets).length) activity.assets = assets;
@@ -331,6 +404,7 @@ module.exports = {
   normalizeMediaPayload,
   normalizeMediaState,
   parseMediaLine,
+  playerFromWindows,
   presenceText,
   selectMediaSession
 };

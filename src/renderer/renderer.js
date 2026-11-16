@@ -1,6 +1,6 @@
 const form = document.querySelector("#presenceForm");
 const mediaTab = document.querySelector("#tabMedia");
-const fields = [...document.querySelectorAll("#presenceForm input[name], #presenceForm select[name], #tabMedia input[name]")];
+const fields = [...document.querySelectorAll("#presenceForm input[name], #presenceForm select[name], #tabMedia input[name], #tabMedia select[name]")];
 const statusPill = document.querySelector("#statusPill");
 const statusText = document.querySelector("#statusText");
 const connectButton = document.querySelector("#connectButton");
@@ -25,13 +25,45 @@ const updateVersion = document.querySelector("#updateVersion");
 const updateNotes = document.querySelector("#updateNotes");
 const toast = document.querySelector("#toast");
 const appVersion = document.querySelector("#appVersion");
-const ACTIVITY_LABELS = { playing: "JOGANDO", listening: "OUVINDO", watching: "ASSISTINDO", competing: "COMPETINDO EM" };
+const timerFields = document.querySelector("#timerFields");
+const timerTimeField = document.querySelector("#timerTimeField");
+const timerModeInfo = document.querySelector("#timerModeInfo");
+const variableBar = document.querySelector("#variableBar");
+const variableToggle = document.querySelector("#variableToggle");
+const variableList = document.querySelector("#variableList");
+const automationList = document.querySelector("#automationRules");
+const addRuleButton = document.querySelector("#addRuleButton");
+const processList = document.querySelector("#processList");
+const updateOpenButton = document.querySelector("#updateOpenButton");
+const updateInstallButton = document.querySelector("#updateInstallButton");
+const updateLaterButton = document.querySelector("#updateLaterButton");
+const updateProgress = document.querySelector("#updateProgress");
+const updateProgressFill = document.querySelector("#updateProgressFill");
+const updateProgressText = document.querySelector("#updateProgressText");
+const ACTIVITY_LABELS = { playing: "Jogando", listening: "Ouvindo", watching: "Assistindo", competing: "Competindo em" };
 const ROTATION_SLOTS = [2, 3, 4];
+const TEXT_FIELD_PATTERN = /^(?:details\d?|state\d?|largeImageText|smallImageText)$/;
+const TIMER_NOTES = {
+  elapsed: "O tempo começa quando a presence é ativada e continua depois de uma reconexão.",
+  since: "Conta desde a última vez que o relógio marcou esse horário. Com 09:00, mostra há quanto tempo você começou hoje.",
+  until: "Mostra quanto falta para esse horário. Depois dele, a contagem vai para o mesmo horário do dia seguinte."
+};
+const TIMER_DEFAULTS = { since: "09:00", until: "18:00" };
+const WEEKDAY_LABELS = ["D", "S", "T", "Q", "Q", "S", "S"];
+const WEEKDAY_NAMES = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+const MAX_RULES = 10;
+const tooltip = document.createElement("div");
+tooltip.className = "tooltip";
+tooltip.setAttribute("role", "tooltip");
+document.body.append(tooltip);
+let tooltipTarget;
+let liveProfileIndex;
 let saveTimeout;
 let previewVariant = 0;
 let previewVariantAt = Date.now();
 let timerStartedAt = Date.now();
 let connected = false;
+const failedPreviewImages = new Set();
 let profileStore;
 let activeProfile = 0;
 let loadingProfile = false;
@@ -41,6 +73,11 @@ let applicationLookupRequest = 0;
 let updateUrl = "";
 let musicState;
 let musicStateAt = 0;
+let watchingMedia;
+let lastTextField = document.querySelector("#details");
+let automationSaveTimeout;
+let processListAt = 0;
+let installingUpdate = false;
 
 function getConfig() {
   return Object.fromEntries(fields.map((field) => [
@@ -72,9 +109,15 @@ function renderProfiles() {
   profileTabs.forEach((button, index) => {
     button.textContent = profileStore.profiles[index].name;
     button.classList.toggle("active", index === activeProfile);
-    button.title = profileStore.profiles[index].name;
+    button.classList.toggle("live", index === liveProfileIndex);
+    button.title = index === liveProfileIndex ? `${profileStore.profiles[index].name} (no ar)` : profileStore.profiles[index].name;
     const option = awayAction.querySelector(`option[value="profile-${index}"]`);
     if (option) option.textContent = `Mostrar o perfil ${profileStore.profiles[index].name}`;
+  });
+  automationList.querySelectorAll('select[data-field="profile"]').forEach((select) => {
+    [...select.options].forEach((option, index) => {
+      option.textContent = profileStore.profiles[index]?.name || `Perfil ${index + 1}`;
+    });
   });
 }
 
@@ -114,14 +157,18 @@ function renderGlobalSettings(settings = {}) {
 
 async function saveGlobalSettings() {
   if (!profileStore) return undefined;
+  clearTimeout(automationSaveTimeout);
+  automationSaveTimeout = undefined;
   profileStore.settings = {
     startWithWindows: startWithWindows.checked,
     autoStartPresence: autoStartPresence.checked,
     autoReconnect: autoReconnect.checked,
     musicCoverLookup: musicCoverLookup.checked,
     musicIgnoredApps: profileStore.settings?.musicIgnoredApps || [],
+    musicVideoApps: profileStore.settings?.musicVideoApps || [],
     awayAction: awayAction.value,
-    awayMinutes: Number(awayMinutes.value)
+    awayMinutes: Number(awayMinutes.value),
+    automationRules: profileStore.settings?.automationRules || []
   };
   clearTimeout(saveTimeout);
   saveTimeout = undefined;
@@ -165,7 +212,16 @@ function showActiveProfile() {
   renderProfiles();
   renderPreview();
   scheduleApplicationLookup(currentProfile().config.clientId, true);
-  window.presenceAPI.watchMusic(Boolean(currentProfile().config.musicMode));
+  syncMediaWatch(currentProfile().config);
+}
+
+// The preview needs the playing media for the media mode and for the
+// {música} and {artista} variables.
+function syncMediaWatch(config = getConfig()) {
+  const wanted = Boolean(config.musicMode) || PresenceFormat.usesMediaVariables(config);
+  if (wanted === watchingMedia) return;
+  watchingMedia = wanted;
+  window.presenceAPI.watchMusic(wanted);
 }
 
 function loadProfile(index) {
@@ -188,25 +244,33 @@ function applyStore(store) {
   renderStartupStatus(store.startupStatus);
   showActiveProfile();
   renderMusicSources();
-}
-
-function display(value, fallback) {
-  return value.trim() || fallback;
+  renderAutomationRules();
 }
 
 function setPreviewImage(containerId, imageId, url, alt) {
   const container = document.querySelector(containerId);
   const image = document.querySelector(imageId);
-  container.classList.toggle("has-image", Boolean(url));
-  const next = url || "";
+  const next = url && !failedPreviewImages.has(url) ? url : "";
+  container.classList.toggle("has-image", Boolean(next));
   // Reassigning the same src restarts animated GIFs on every re-render.
   if ((image.getAttribute("src") ?? "") !== next) image.src = next;
-  image.alt = url ? alt : "";
+  image.alt = next ? alt : "";
+}
+
+for (const image of document.querySelectorAll("#largeAssetImage, #smallAssetImage")) {
+  image.addEventListener("error", () => {
+    const src = image.getAttribute("src");
+    if (!src) return;
+    failedPreviewImages.add(src);
+    image.parentElement.classList.remove("has-image");
+    image.alt = "";
+  });
 }
 
 async function lookupApplication(clientId) {
   const request = ++applicationLookupRequest;
   applicationPreview = undefined;
+  failedPreviewImages.clear();
   renderPreview();
 
   try {
@@ -317,9 +381,20 @@ function getButtonError(config) {
   return "";
 }
 
+function playingMedia() {
+  return musicState?.presentation?.mode === "music" ? musicState.media : undefined;
+}
+
 function currentMusic(config) {
-  if (!config.musicMode || musicState?.presentation?.mode !== "music" || !musicState.media) return undefined;
-  return musicState.media;
+  return config.musicMode ? playingMedia() : undefined;
+}
+
+function textContext() {
+  return {
+    now: Date.now(),
+    profileName: profileName.value.trim() || `Perfil ${activeProfile + 1}`,
+    media: playingMedia()
+  };
 }
 
 function sourceLabel(app) {
@@ -331,11 +406,12 @@ function renderMusicSources() {
   const container = document.querySelector("#musicSources");
   const ignoredApps = profileStore?.settings?.musicIgnoredApps || [];
   const detected = musicState?.sources || [];
+  const videoApps = profileStore?.settings?.musicVideoApps || [];
 
   const rows = detected.map((source) => ({ ...source, detected: true }));
   for (const app of ignoredApps) {
     if (!detected.some((source) => source.app.toLowerCase() === app)) {
-      rows.push({ app, title: "", playing: false, ignored: true, detected: false });
+      rows.push({ app, title: "", playing: false, ignored: true, video: videoApps.includes(app), detected: false });
     }
   }
 
@@ -360,14 +436,28 @@ function renderMusicSources() {
 
     const info = document.createElement("div");
     const name = document.createElement("strong");
-    name.textContent = sourceLabel(row.app);
+    name.textContent = row.player ? `${sourceLabel(row.app)} · ${row.player}` : sourceLabel(row.app);
     const detail = document.createElement("span");
+    const kind = row.video || row.reportedVideo ? " · vídeo" : "";
     detail.textContent = !row.detected
       ? "Bloqueada (sem mídia agora)"
       : row.ignored
         ? "Bloqueada"
-        : `${row.playing ? "Tocando" : "Em pausa"}${row.title ? ` - ${row.title}` : ""}`;
+        : `${row.playing ? "Tocando" : "Em pausa"}${kind}${row.title ? ` - ${row.title}` : ""}`;
     info.append(name, detail);
+
+    const actions = document.createElement("div");
+    actions.className = "music-source-actions";
+    if (!row.ignored && !row.reportedVideo) {
+      const video = document.createElement("button");
+      video.type = "button";
+      video.className = `ghost-button${row.video ? " selected" : ""}`;
+      video.textContent = row.video ? "Vídeo" : "Marcar como vídeo";
+      video.title = row.video ? "Voltar a tratar como música" : "Mostrar como Assistindo no Discord";
+      video.dataset.app = row.app;
+      video.dataset.video = row.video ? "0" : "1";
+      actions.append(video);
+    }
 
     const action = document.createElement("button");
     action.type = "button";
@@ -375,10 +465,24 @@ function renderMusicSources() {
     action.textContent = row.ignored ? "Desbloquear" : "Bloquear";
     action.dataset.app = row.app;
     action.dataset.ignore = row.ignored ? "0" : "1";
+    actions.append(action);
 
-    item.append(info, action);
+    item.append(info, actions);
     return item;
   }));
+}
+
+async function toggleVideoSource(app, video) {
+  if (!profileStore) return;
+  const list = new Set(profileStore.settings?.musicVideoApps || []);
+  if (video) list.add(app.toLowerCase());
+  else list.delete(app.toLowerCase());
+  profileStore.settings.musicVideoApps = [...list];
+  renderMusicSources.signature = undefined;
+  await saveGlobalSettings();
+  showToast(video
+    ? `${sourceLabel(app)} aparece como Assistindo.`
+    : `${sourceLabel(app)} volta a aparecer como Ouvindo.`);
 }
 
 async function toggleIgnoredSource(app, ignore) {
@@ -399,6 +503,22 @@ function formatTime(ms) {
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatClockDuration(ms) {
+  const elapsed = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(elapsed / 3600);
+  const minutes = Math.floor((elapsed % 3600) / 60);
+  const seconds = elapsed % 60;
+  return `${hours ? `${String(hours).padStart(2, "0")}:` : ""}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function renderTimer(config = getConfig()) {
+  const now = Date.now();
+  const timestamps = PresenceFormat.timerTimestamps(config, { startMs: timerStartedAt, nowMs: now });
+  document.querySelector("#previewTimer").textContent = timestamps?.end
+    ? `${formatClockDuration(timestamps.end - now)} restante`
+    : `${formatClockDuration(now - (timestamps?.start ?? now))} decorrido`;
 }
 
 function renderMusicProgress() {
@@ -426,30 +546,41 @@ function renderPreview() {
     : undefined;
   const music = currentMusic(config);
   const musicPaused = Boolean(music && musicState.presentation.paused);
+  const player = music && config.musicPlayerIcon && !config.smallImageKey.trim() ? PresenceFormat.playerInfo(music.player || music.app) : undefined;
   const largeImageUrl = music?.artUrl
     || previewImage(config.largeImageKey, matchingApplication)
     || (!config.largeImageKey.trim() ? matchingApplication?.iconUrl : "");
-  const smallImageUrl = previewImage(config.smallImageKey, matchingApplication);
+  const smallImageUrl = player?.icon || previewImage(config.smallImageKey, matchingApplication);
   const variants = previewVariants(config);
   if (previewVariant >= variants.length) previewVariant = 0;
   const text = variants[previewVariant];
+  const context = textContext();
   const largeKeyIsLink = /^https?:\/\//i.test(config.largeImageKey.trim());
 
   rotationFields.hidden = !config.rotateTexts;
+  timerFields.hidden = !config.showTimer;
+  timerTimeField.hidden = config.timerMode === "elapsed";
+  setInfo(timerModeInfo, TIMER_NOTES[config.timerMode] || TIMER_NOTES.elapsed);
   document.querySelector("#previewMode").textContent = music
-    ? "OUVINDO"
-    : ACTIVITY_LABELS[config.activityType] || "JOGANDO";
-  document.querySelector("#previewApp").textContent = matchingApplication?.name
+    ? (config.musicAsPlaying ? "Jogando" : music.video ? "Assistindo" : "Ouvindo")
+    : ACTIVITY_LABELS[config.activityType] || "Jogando";
+  const playerName = music && config.musicPlayerName ? PresenceFormat.playerInfo(music.player || music.app)?.name : "";
+  document.querySelector("#previewApp").textContent = playerName
+    || matchingApplication?.name
     || (config.clientId ? `App ${config.clientId.slice(0, 8)}` : "Seu aplicativo");
-  document.querySelector("#previewDetails").textContent = music
+  const previewDetails = document.querySelector("#previewDetails");
+  previewDetails.textContent = music
     ? music.title
-    : display(text.details, "Sem detalhes");
-  document.querySelector("#previewState").textContent = music
+    : PresenceFormat.resolveText(text.details, context).trim();
+  previewDetails.title = previewDetails.textContent;
+  const previewState = document.querySelector("#previewState");
+  previewState.textContent = music
     ? (musicPaused ? (music.artist ? `Em pausa - ${music.artist}` : "Em pausa") : music.artist)
-    : display(text.state, "Sem estado");
+    : PresenceFormat.resolveText(text.state, context).trim();
+  previewState.title = previewState.textContent;
   const intervalOption = document.querySelector('select[name="rotationInterval"]').selectedOptions[0];
   document.querySelector("#previewRotation").textContent = !music && variants.length > 1
-    ? `Texto ${previewVariant + 1} de ${variants.length} · troca a cada ${intervalOption?.textContent || "30 segundos"}`
+    ? `Mostrando o texto ${previewVariant + 1} de ${variants.length}, que troca a cada ${intervalOption?.textContent || "30 segundos"}`
     : "";
   document.querySelector("#largeAssetFallback").textContent = music
     ? music.title.slice(0, 1).toUpperCase()
@@ -457,29 +588,34 @@ function renderPreview() {
       ? config.largeImageKey.slice(0, 2).toUpperCase()
       : matchingApplication?.name?.slice(0, 1).toUpperCase() || "R";
   setPreviewImage("#largeAsset", "#largeAssetImage", largeImageUrl, "Imagem grande da presence");
-  document.querySelector("#smallAsset").style.display = config.smallImageKey ? "grid" : "none";
+  document.querySelector("#smallAsset").title = player?.name || "";
   setPreviewImage("#smallAsset", "#smallAssetImage", smallImageUrl, "Imagem pequena da presence");
   document.querySelector("#previewTimer").style.display = !music && config.showTimer ? "block" : "none";
+  renderTimer(config);
 
   const hint = document.querySelector("#musicHint");
   if (config.musicMode && musicState?.error) {
     hint.textContent = musicState.error;
-  } else if (config.musicMode && !music) {
-    hint.textContent = "Sem mídia em reprodução - mostrando a presence configurada.";
+  } else if (config.musicMode && !music && !connected) {
+    hint.textContent = "Nenhuma mídia tocando agora, então a presence do perfil aparece";
   } else {
     hint.textContent = "";
   }
   hint.style.display = hint.textContent ? "block" : "none";
 
   renderMusicProgress();
-  renderPreviewButtons(config);
+  renderPreviewButtons(config, music);
 }
 
-function renderPreviewButtons(config) {
+function renderPreviewButtons(config, music) {
+  const listen = music && !music.video
+    ? PresenceFormat.musicButton(config.musicButton, music, { app: music.player || music.app, links: music.links || {} })
+    : undefined;
   const buttons = [
+    listen,
     { label: config.button1Label, url: config.button1Url },
     { label: config.button2Label, url: config.button2Url }
-  ].filter((button) => button.label.trim());
+  ].filter((button) => button?.label.trim()).slice(0, 2);
 
   // Skip identical re-renders: replacing the nodes mid-press would swallow
   // the click, and music state refreshes re-render the preview repeatedly.
@@ -510,13 +646,20 @@ function syncPreviewVariant(text) {
   renderPreview();
 }
 
-function setStatus({ status, message, startedAt, connected: isConnected, text }) {
+function setStatus({ status, message, startedAt, connected: isConnected, text, liveProfile }) {
+  const wasConnected = connected;
   connected = typeof isConnected === "boolean" ? isConnected : status === "online";
+  const nextLive = connected && Number.isInteger(liveProfile) ? liveProfile : undefined;
+  if (nextLive !== liveProfileIndex) {
+    liveProfileIndex = nextLive;
+    renderProfiles();
+  }
   if (connected && Number.isFinite(startedAt)) timerStartedAt = startedAt;
   statusPill.className = `connection-pill ${status}`;
   statusText.textContent = message;
   connectButton.querySelector("span").textContent = connected ? "Atualizar presence" : "Ativar presence";
   if (connected) syncPreviewVariant(text);
+  if (connected !== wasConnected) renderPreview();
 }
 
 function showToast(message, duration = 2800) {
@@ -581,9 +724,47 @@ function renderReleaseNotes(notes) {
 function showUpdate(update) {
   updateUrl = update.url;
   updateTitle.textContent = update.name;
-  updateVersion.textContent = `${update.currentVersion}  >  ${update.version}`;
+  updateVersion.textContent = `${update.currentVersion} → ${update.version}`;
   renderReleaseNotes(update.notes);
-  openModal(updateModal, document.querySelector("#updateOpenButton"));
+  updateInstallButton.hidden = !update.canInstall;
+  updateOpenButton.className = update.canInstall ? "secondary-button" : "primary-button";
+  if (!installingUpdate) updateProgress.hidden = true;
+  openModal(updateModal, update.canInstall ? updateInstallButton : updateOpenButton);
+}
+
+function megabytes(bytes) {
+  return (bytes / 1024 / 1024).toFixed(1).replace(".", ",");
+}
+
+function renderUpdateProgress({ received = 0, total = 0, stage } = {}) {
+  updateProgress.hidden = false;
+  const ratio = total ? Math.min(1, received / total) : 0;
+  updateProgressFill.style.width = `${(ratio * 100).toFixed(1)}%`;
+  updateProgressText.textContent = stage === "restart"
+    ? "Download conferido. Reiniciando na nova versão..."
+    : total
+      ? `Baixando ${megabytes(received)} de ${megabytes(total)} MB`
+      : `Baixando ${megabytes(received)} MB`;
+}
+
+async function installUpdate() {
+  if (installingUpdate) return;
+  installingUpdate = true;
+  updateInstallButton.disabled = true;
+  updateLaterButton.disabled = true;
+  renderUpdateProgress();
+  updateProgressText.textContent = "Preparando o download...";
+  try {
+    const result = await window.presenceAPI.installUpdate();
+    if (result?.ok) return;
+    showToast(result?.error || "Não foi possível atualizar.", 6000);
+  } catch (error) {
+    showToast(error?.message || "Não foi possível atualizar.", 6000);
+  }
+  installingUpdate = false;
+  updateInstallButton.disabled = false;
+  updateLaterButton.disabled = false;
+  updateProgress.hidden = true;
 }
 
 function closeUpdate() {
@@ -606,6 +787,118 @@ function closeModal(modal) {
 function openSettings() {
   settingsButton.setAttribute("aria-expanded", "true");
   openModal(settingsModal, document.querySelector("#settingsCloseButton"));
+  loadProcessList();
+}
+
+function automationRules() {
+  if (!profileStore) return [];
+  if (!Array.isArray(profileStore.settings.automationRules)) profileStore.settings.automationRules = [];
+  return profileStore.settings.automationRules;
+}
+
+async function loadProcessList(force = false) {
+  if (!force && Date.now() - processListAt < 10000) return;
+  processListAt = Date.now();
+  const names = await window.presenceAPI.listProcesses().catch(() => []);
+  processList.replaceChildren(...names.slice(0, 500).map((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    return option;
+  }));
+}
+
+function ruleControl(tag, field, attributes = {}) {
+  const element = document.createElement(tag);
+  if (field) element.dataset.field = field;
+  Object.assign(element, attributes);
+  return element;
+}
+
+function ruleElement(rule, index, count) {
+  const row = document.createElement("div");
+  row.className = `rule-row${rule.enabled ? "" : " off"}`;
+  row.dataset.index = String(index);
+
+  const head = document.createElement("div");
+  head.className = "rule-head";
+  const toggle = document.createElement("label");
+  toggle.className = "mini-switch";
+  toggle.title = rule.enabled ? "Desligar esta regra" : "Ligar esta regra";
+  toggle.append(ruleControl("input", "enabled", { type: "checkbox", checked: rule.enabled }), document.createElement("i"));
+
+  const type = ruleControl("select", "type", { title: "Quando a regra vale" });
+  type.append(new Option("Programa aberto", "process"), new Option("Horário", "schedule"));
+  type.value = rule.type;
+
+  const arrow = document.createElement("span");
+  arrow.className = "rule-arrow";
+  arrow.textContent = "ativa";
+
+  const profile = ruleControl("select", "profile", { title: "Perfil que a regra ativa" });
+  profileStore.profiles.forEach((item, profileIndex) => profile.append(new Option(item.name, String(profileIndex))));
+  profile.value = String(rule.profile);
+
+  const up = ruleControl("button", "", { type: "button", className: "rule-icon", title: "Subir: a regra de cima tem prioridade", disabled: index === 0 });
+  up.dataset.action = "up";
+  const remove = ruleControl("button", "", { type: "button", className: "rule-icon", title: "Remover regra" });
+  remove.dataset.action = "remove";
+  head.append(toggle, type, arrow, profile, up, remove);
+
+  const body = document.createElement("div");
+  body.className = "rule-body";
+  if (rule.type === "process") {
+    const input = ruleControl("input", "process", { value: rule.process, maxLength: 64, placeholder: "Nome do programa, como Code.exe", spellcheck: false });
+    input.setAttribute("list", "processList");
+    body.append(input);
+  } else {
+    const days = document.createElement("div");
+    days.className = "rule-days";
+    WEEKDAY_LABELS.forEach((label, day) => {
+      const button = ruleControl("button", "", { type: "button", textContent: label, title: WEEKDAY_NAMES[day] });
+      button.dataset.day = String(day);
+      button.classList.toggle("active", rule.days.includes(day));
+      button.setAttribute("aria-pressed", String(rule.days.includes(day)));
+      days.append(button);
+    });
+    const until = document.createElement("span");
+    until.className = "rule-arrow";
+    until.textContent = "até";
+    body.append(days, ruleControl("input", "start", { type: "time", value: rule.start, title: "Começa" }), until,
+      ruleControl("input", "end", { type: "time", value: rule.end, title: "Termina (pode passar da meia-noite)" }));
+  }
+
+  row.append(head, body);
+  if (count === 1) up.hidden = true;
+  return row;
+}
+
+function renderAutomationRules() {
+  const rules = automationRules();
+  addRuleButton.disabled = rules.length >= MAX_RULES;
+  if (!rules.length) {
+    const empty = document.createElement("p");
+    empty.className = "music-sources-empty";
+    empty.textContent = "Nenhuma regra ainda. Ex.: com o Code.exe aberto, ativar o perfil Programação.";
+    automationList.replaceChildren(empty);
+    return;
+  }
+  automationList.replaceChildren(...rules.map((rule, index) => ruleElement(rule, index, rules.length)));
+}
+
+function saveAutomation({ rerender = false, delay = 0 } = {}) {
+  clearTimeout(automationSaveTimeout);
+  if (rerender) renderAutomationRules();
+  automationSaveTimeout = setTimeout(() => {
+    automationSaveTimeout = undefined;
+    saveGlobalSettings();
+  }, delay);
+}
+
+function ruleFromEvent(event) {
+  const row = event.target.closest(".rule-row");
+  if (!row) return undefined;
+  const index = Number(row.dataset.index);
+  return { index, rule: automationRules()[index] };
 }
 
 function closeSettings() {
@@ -680,12 +973,15 @@ function handleConfigInput(event) {
   // Only named fields belong to the profile; global settings save themselves.
   const isField = event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement;
   if (!isField || !event.target.name) return;
+  if (event.target.name === "timerMode" && TIMER_DEFAULTS[event.target.value] && !document.querySelector("#timerTime").value) {
+    document.querySelector("#timerTime").value = TIMER_DEFAULTS[event.target.value];
+  }
   followPreviewVariant(event.target);
   renderPreview();
   if (event.target.name === "clientId") scheduleApplicationLookup(event.target.value);
-  if (event.target.name === "musicMode") {
-    window.presenceAPI.watchMusic(event.target.checked);
-    if (connected) showToast("Clique em Atualizar presence para aplicar a mudança.");
+  syncMediaWatch();
+  if (event.target.name === "musicMode" && connected) {
+    showToast("Clique em Atualizar presence para aplicar a mudança.");
   }
   updateCurrentProfile();
   scheduleSave();
@@ -694,9 +990,36 @@ function handleConfigInput(event) {
 form.addEventListener("input", handleConfigInput);
 mediaTab.addEventListener("input", handleConfigInput);
 form.addEventListener("focusin", (event) => {
+  if (TEXT_FIELD_PATTERN.test(event.target.name || "")) lastTextField = event.target;
   const before = previewVariant;
   followPreviewVariant(event.target);
   if (previewVariant !== before) renderPreview();
+});
+
+variableBar.addEventListener("mousedown", (event) => {
+  if (event.target.closest("button[data-variable], #variableToggle")) event.preventDefault();
+});
+variableToggle.addEventListener("click", () => {
+  const open = variableToggle.getAttribute("aria-expanded") !== "true";
+  variableToggle.setAttribute("aria-expanded", String(open));
+  variableList.hidden = !open;
+});
+variableBar.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-variable]");
+  if (!button) return;
+  const field = lastTextField?.isConnected && !lastTextField.closest("[hidden]")
+    ? lastTextField
+    : document.querySelector("#details");
+  const value = button.dataset.variable;
+  const start = field.selectionStart ?? field.value.length;
+  const end = field.selectionEnd ?? start;
+  if (field.value.length - (end - start) + value.length > field.maxLength) {
+    showToast("Não cabe mais texto nesse campo.");
+    return;
+  }
+  field.focus();
+  field.setRangeText(value, start, end, "end");
+  field.dispatchEvent(new Event("input", { bubbles: true }));
 });
 
 const editorTabs = [...document.querySelectorAll("#editorTabs button")];
@@ -787,13 +1110,13 @@ disconnectButton.addEventListener("click", async () => {
 
 document.querySelector("#resetButton").addEventListener("click", () => {
   fields.forEach((field) => {
-    if (field.type === "checkbox") field.checked = field.name === "showTimer";
+    if (field.type === "checkbox") field.checked = field.name === "showTimer" || field.name === "musicPlayerIcon";
     else if (field instanceof HTMLSelectElement) {
       field.value = [...field.options].find((option) => option.defaultSelected)?.value ?? field.options[0].value;
     } else if (field.name !== "clientId") field.value = "";
   });
   previewVariant = 0;
-  window.presenceAPI.watchMusic(false);
+  syncMediaWatch();
   renderPreview();
   flushProfiles();
   showToast("Campos limpos.");
@@ -805,10 +1128,66 @@ document.querySelector("#portalLink").addEventListener("click", (event) => {
 });
 
 document.querySelector("#updateCloseButton").addEventListener("click", closeUpdate);
-document.querySelector("#updateLaterButton").addEventListener("click", closeUpdate);
-document.querySelector("#updateOpenButton").addEventListener("click", () => {
+updateLaterButton.addEventListener("click", closeUpdate);
+updateOpenButton.addEventListener("click", () => {
   if (updateUrl) window.presenceAPI.openLink(updateUrl);
-  closeUpdate();
+  if (!installingUpdate) closeUpdate();
+});
+updateInstallButton.addEventListener("click", installUpdate);
+
+addRuleButton.addEventListener("click", () => {
+  const rules = automationRules();
+  if (rules.length >= MAX_RULES) return;
+  rules.push({ enabled: true, type: "process", process: "", days: [1, 2, 3, 4, 5], start: "09:00", end: "18:00", profile: activeProfile });
+  saveAutomation({ rerender: true });
+  automationList.querySelector(".rule-row:last-child input[data-field='process']")?.focus();
+  loadProcessList();
+});
+
+automationList.addEventListener("input", (event) => {
+  const target = ruleFromEvent(event);
+  if (!target?.rule || event.target.dataset.field !== "process") return;
+  target.rule.process = event.target.value;
+  saveAutomation({ delay: 500 });
+});
+
+automationList.addEventListener("change", (event) => {
+  const target = ruleFromEvent(event);
+  const field = event.target.dataset.field;
+  if (!target?.rule || !field || field === "process") return;
+  if (field === "enabled") target.rule.enabled = event.target.checked;
+  else if (field === "profile") target.rule.profile = Number(event.target.value);
+  else if (field === "type") target.rule.type = event.target.value;
+  else if ((field === "start" || field === "end") && event.target.value) target.rule[field] = event.target.value;
+  saveAutomation({ rerender: field === "type" || field === "enabled" });
+});
+
+automationList.addEventListener("click", (event) => {
+  const target = ruleFromEvent(event);
+  if (!target?.rule) return;
+  const rules = automationRules();
+  const day = event.target.closest("button[data-day]");
+  const action = event.target.closest("button[data-action]")?.dataset.action;
+
+  if (day) {
+    const value = Number(day.dataset.day);
+    const days = new Set(target.rule.days);
+    if (days.has(value)) days.delete(value);
+    else days.add(value);
+    target.rule.days = [...days].sort((left, right) => left - right);
+    saveAutomation({ rerender: true });
+  } else if (action === "up" && target.index > 0) {
+    [rules[target.index - 1], rules[target.index]] = [rules[target.index], rules[target.index - 1]];
+    saveAutomation({ rerender: true });
+  } else if (action === "remove") {
+    rules.splice(target.index, 1);
+    saveAutomation({ rerender: true });
+    showToast("Regra removida.");
+  }
+});
+
+automationList.addEventListener("focusin", (event) => {
+  if (event.target.dataset.field === "process") loadProcessList();
 });
 
 updateModal.addEventListener("click", (event) => {
@@ -821,18 +1200,85 @@ settingsModal.addEventListener("click", (event) => {
   if (event.target === settingsModal) closeSettings();
 });
 
+function setInfo(element, text) {
+  if (element.dataset.tip === text) return;
+  element.dataset.tip = text;
+  element.setAttribute("aria-label", text);
+  if (tooltipTarget === element) showTooltip(element);
+}
+
+function showTooltip(target) {
+  tooltipTarget = target;
+  tooltip.textContent = target.dataset.tip;
+  tooltip.style.left = "0px";
+  tooltip.style.top = "0px";
+  const anchor = target.getBoundingClientRect();
+  const box = tooltip.getBoundingClientRect();
+  const margin = 10;
+  const left = Math.min(Math.max(margin, anchor.left + anchor.width / 2 - box.width / 2), window.innerWidth - box.width - margin);
+  const below = anchor.bottom + 8;
+  const top = below + box.height > window.innerHeight - margin ? anchor.top - box.height - 8 : below;
+  tooltip.style.left = `${Math.round(left)}px`;
+  tooltip.style.top = `${Math.round(Math.max(margin, top))}px`;
+  tooltip.classList.add("visible");
+}
+
+function hideTooltip() {
+  tooltipTarget = undefined;
+  tooltip.classList.remove("visible");
+}
+
+for (const info of document.querySelectorAll(".info")) {
+  info.setAttribute("role", "img");
+  info.setAttribute("aria-label", info.dataset.tip);
+}
+
+document.addEventListener("mouseover", (event) => {
+  const target = event.target.closest("[data-tip]");
+  if (target?.dataset.tip && target !== tooltipTarget) showTooltip(target);
+});
+
+document.addEventListener("mouseout", (event) => {
+  const target = event.target.closest("[data-tip]");
+  if (target && target === tooltipTarget && !target.contains(event.relatedTarget) && document.activeElement !== target) hideTooltip();
+});
+
+document.addEventListener("focusin", (event) => {
+  if (event.target.matches("[data-tip]") && event.target.dataset.tip) showTooltip(event.target);
+});
+
+document.addEventListener("focusout", (event) => {
+  if (event.target === tooltipTarget) hideTooltip();
+});
+
+document.addEventListener("click", (event) => {
+  const info = event.target.closest(".info");
+  if (!info) return;
+  event.preventDefault();
+  info.focus();
+}, true);
+
+window.addEventListener("scroll", hideTooltip, true);
+window.addEventListener("resize", hideTooltip);
+
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if (updateModal.classList.contains("visible")) closeUpdate();
+  if (tooltipTarget) hideTooltip();
+  else if (updateModal.classList.contains("visible")) closeUpdate();
   else if (settingsModal.classList.contains("visible")) closeSettings();
 });
 
 window.presenceAPI.onStatus(setStatus);
-window.presenceAPI.onProfileSelected((index) => {
+window.presenceAPI.onProfileSelected(({ index, source, name } = {}) => {
+  if (source === "automation") {
+    showToast(`Automação: perfil ${name} ativado.`);
+    return;
+  }
   if (!profileStore?.profiles[index] || index === activeProfile) return;
   loadProfile(index);
   showToast(`${currentProfile().name} ativado pela bandeja.`);
 });
+window.presenceAPI.onUpdateProgress(renderUpdateProgress);
 window.presenceAPI.onMusicState((data) => {
   musicState = data;
   musicStateAt = Date.now();
@@ -843,17 +1289,15 @@ window.presenceAPI.onMusicState((data) => {
 document.querySelector("#musicSources").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-app]");
   if (!button) return;
-  toggleIgnoredSource(button.dataset.app, button.dataset.ignore === "1");
+  if (button.dataset.video) toggleVideoSource(button.dataset.app, button.dataset.video === "1");
+  else toggleIgnoredSource(button.dataset.app, button.dataset.ignore === "1");
 });
 window.presenceAPI.onUpdateAvailable(showUpdate);
 
 setInterval(() => {
-  const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
-  const hours = Math.floor(elapsed / 3600);
-  const minutes = Math.floor((elapsed % 3600) / 60);
-  const seconds = elapsed % 60;
-  document.querySelector("#previewTimer").textContent =
-    `${hours ? `${String(hours).padStart(2, "0")}:` : ""}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")} decorrido`;
+  const config = getConfig();
+  if (PresenceFormat.usesClockVariables(config)) renderPreview();
+  else renderTimer(config);
   renderMusicProgress();
   advancePreviewVariant();
 }, 1000);
@@ -865,7 +1309,8 @@ window.presenceAPI.loadConfig().then((store) => {
     appVersion.hidden = false;
   }
   if (store.presenceStatus) setStatus(store.presenceStatus);
+  if (store.updated) showToast(`Atualizado para a versão ${store.appVersion}.`, 5000);
   if (store.corruptedBackup) {
     showToast("O arquivo de configuração estava corrompido e foi guardado como cópia. Os perfis voltaram ao padrão.", 8000);
   }
-});
+}).finally(() => window.presenceAPI.ready());

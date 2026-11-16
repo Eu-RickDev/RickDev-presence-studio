@@ -10,8 +10,12 @@ contextBridge.exposeInMainWorld("presenceAPI", {
   disconnect: () => ipcRenderer.invoke("presence:disconnect"),
   openLink: (url) => ipcRenderer.invoke("link:open", url),
   watchMusic: (enabled) => ipcRenderer.invoke("music:watch", enabled),
+  listProcesses: () => ipcRenderer.invoke("automation:processes"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  ready: () => ipcRenderer.send("ui:ready"),
   onStatus: (callback) => ipcRenderer.on("presence:status", (_event, data) => callback(data)),
   onMusicState: (callback) => ipcRenderer.on("music:state", (_event, data) => callback(data)),
-  onProfileSelected: (callback) => ipcRenderer.on("profiles:selected", (_event, index) => callback(index)),
-  onUpdateAvailable: (callback) => ipcRenderer.on("update:available", (_event, data) => callback(data))
+  onProfileSelected: (callback) => ipcRenderer.on("profiles:selected", (_event, data) => callback(data)),
+  onUpdateAvailable: (callback) => ipcRenderer.on("update:available", (_event, data) => callback(data)),
+  onUpdateProgress: (callback) => ipcRenderer.on("update:progress", (_event, data) => callback(data))
 });

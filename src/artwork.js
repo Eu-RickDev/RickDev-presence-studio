@@ -4,7 +4,7 @@ const LOOKUP_TIMEOUT_MS = 6000;
 const MAX_IMAGE_URL_LENGTH = 256;
 const SEARCH_LIMIT = 10;
 const USER_AGENT = "RickDev Presence Studio";
-const EMPTY_TRACK_INFO = Object.freeze({ artUrl: "", album: "" });
+const EMPTY_TRACK_INFO = Object.freeze({ artUrl: "", album: "", trackUrl: "", service: "" });
 
 const BRACKETED_PATTERN = /\s*[([【][^)\]】]*[)\]】]/g;
 const TITLE_SEPARATOR = /\s+[-–—]\s+/;
@@ -117,7 +117,9 @@ function pickBest(items, query, readCandidate) {
       bestScore = score;
     }
   }
-  return best ? { artUrl: best.artUrl, album: cleanAlbum(best.album) } : undefined;
+  if (!best) return undefined;
+  const trackUrl = /^https:\/\//i.test(best.trackUrl || "") && best.trackUrl.length <= 512 ? best.trackUrl : "";
+  return { artUrl: best.artUrl, album: cleanAlbum(best.album), trackUrl, service: trackUrl ? best.service : "" };
 }
 
 function pickItunesMatch(results, query) {
@@ -126,7 +128,9 @@ function pickItunesMatch(results, query) {
     title: song?.trackName,
     album: song?.collectionName,
     compilation: Boolean(song?.collectionArtistName) && !artistsOverlap(song.collectionArtistName, song.artistName),
-    artUrl: String(song?.artworkUrl100 || "").replace("100x100bb", "512x512bb")
+    artUrl: String(song?.artworkUrl100 || "").replace("100x100bb", "512x512bb"),
+    trackUrl: String(song?.trackViewUrl || ""),
+    service: "apple"
   }));
 }
 
@@ -137,7 +141,9 @@ function pickDeezerMatch(results, query) {
       artist: song.artist?.name,
       title: song.title,
       album: song.album.title,
-      artUrl: String(song.album.cover_xl || song.album.cover_big || "")
+      artUrl: String(song.album.cover_xl || song.album.cover_big || ""),
+      trackUrl: String(song.link || ""),
+      service: "deezer"
     };
   });
 }
