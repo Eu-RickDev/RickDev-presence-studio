@@ -37,6 +37,23 @@ const APPLY_SCRIPT = [
   "if ($launch -ne $source) { Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue }"
 ].join("\n");
 
+const START_TIMEOUT_MS = 20000;
+
+function powershellArguments(script) {
+  return [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy", "Bypass",
+    "-WindowStyle", "Hidden",
+    "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")
+  ];
+}
+
+const START_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  `Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -WindowStyle Hidden -ArgumentList '${powershellArguments(APPLY_SCRIPT).join(" ")}'`
+].join("\n");
+
 function pickReleaseAsset(release) {
   const assets = Array.isArray(release?.assets) ? release.assets : [];
   return assets.find((asset) => /\.exe$/i.test(String(asset?.name || ""))
@@ -100,29 +117,44 @@ async function downloadUpdate({ url, size = 0, sha256, target, fetch, onProgress
   return target;
 }
 
-function launchUpdate({ source, target, resume = false, spawnProcess = spawn, environment = process.env, pid = process.pid }) {
+function launchUpdate({
+  source,
+  target,
+  resume = false,
+  spawnProcess = spawn,
+  environment = process.env,
+  pid = process.pid,
+  timeoutMs = START_TIMEOUT_MS
+}) {
   const env = Object.fromEntries(Object.entries(environment)
     .filter(([key]) => !/^PORTABLE_EXECUTABLE_/i.test(key)));
-  const child = spawnProcess("powershell.exe", [
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy", "Bypass",
-    "-WindowStyle", "Hidden",
-    "-EncodedCommand", Buffer.from(APPLY_SCRIPT, "utf16le").toString("base64")
-  ], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-    env: {
-      ...env,
-      RICKDEV_UPDATE_SOURCE: source,
-      RICKDEV_UPDATE_TARGET: target || "",
-      RICKDEV_UPDATE_PID: String(pid),
-      RICKDEV_UPDATE_RESUME: resume ? "1" : "0"
-    }
+  return new Promise((resolve, reject) => {
+    const fail = () => reject(new Error("Não foi possível reiniciar na nova versão. Tente de novo ou baixe pelo GitHub."));
+    const child = spawnProcess("powershell.exe", powershellArguments(START_SCRIPT), {
+      stdio: "ignore",
+      windowsHide: true,
+      env: {
+        ...env,
+        RICKDEV_UPDATE_SOURCE: source,
+        RICKDEV_UPDATE_TARGET: target || "",
+        RICKDEV_UPDATE_PID: String(pid),
+        RICKDEV_UPDATE_RESUME: resume ? "1" : "0"
+      }
+    });
+    const timer = setTimeout(() => {
+      child.kill?.();
+      fail();
+    }, timeoutMs);
+    child.once("error", () => {
+      clearTimeout(timer);
+      fail();
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else fail();
+    });
   });
-  child.unref?.();
-  return child;
 }
 
 async function cleanupDownloads(directory, keepPath = "", fileSystem = fs.promises) {
@@ -147,5 +179,6 @@ module.exports = {
   expectedSha256,
   launchUpdate,
   pickReleaseAsset,
+  START_SCRIPT,
   updateFileName
 };

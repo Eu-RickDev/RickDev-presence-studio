@@ -332,7 +332,7 @@ async function installUpdate() {
     });
 
     sendUpdateProgress({ received: update.size, total: update.size, stage: "restart" });
-    launchUpdate({
+    await launchUpdate({
       source: target,
       target: process.env.PORTABLE_EXECUTABLE_FILE,
       resume: presenceConnected() || Boolean(awayState)
