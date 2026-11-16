@@ -1,5 +1,5 @@
 const { presenceText } = require("./media");
-const { resolveText, timerTimestamps } = require("./renderer/presence-format");
+const { resolveText, statusDisplayType, timerTimestamps } = require("./renderer/presence-format");
 
 const MAX_UNIX_TIMESTAMP_MS = 2147483647000;
 const ACTIVITY_TYPES = Object.freeze({ playing: 0, listening: 2, watching: 3, competing: 5 });
@@ -76,8 +76,35 @@ function textVariants(config) {
   return variants;
 }
 
-function rotationIntervalMs(config) {
-  const seconds = Number(config.rotationInterval);
+function imageVariants(config) {
+  const main = {
+    large: String(config.largeImageKey || "").trim(),
+    small: String(config.smallImageKey || "").trim(),
+    slot: 1
+  };
+  const variants = [main];
+  if (!config.rotateImages) return variants;
+
+  for (const slot of ROTATION_SLOTS) {
+    const large = String(config[`largeImageKey${slot}`] || "").trim();
+    const small = String(config[`smallImageKey${slot}`] || "").trim();
+    if (large || small) variants.push({ large: large || main.large, small: small || main.small, slot });
+  }
+  return variants;
+}
+
+function validateImages(config) {
+  validateImage(config.largeImageKey, "Imagem grande");
+  validateImage(config.smallImageKey, "Imagem pequena");
+  if (!config.rotateImages) return;
+  for (const slot of ROTATION_SLOTS) {
+    validateImage(config[`largeImageKey${slot}`], `Imagem grande ${slot}`);
+    validateImage(config[`smallImageKey${slot}`], `Imagem pequena ${slot}`);
+  }
+}
+
+function rotationIntervalMs(config, field = "rotationInterval") {
+  const seconds = Number(config[field]);
   return (ROTATION_INTERVALS.includes(seconds) ? seconds : DEFAULT_ROTATION_SECONDS) * 1000;
 }
 
@@ -92,11 +119,19 @@ function validTimestamps(timestamps) {
 }
 
 function buildActivity(config, options = {}) {
-  const { startTimestamp, variant = 0, includeType = true, appIcon = "", context = {}, now = Date.now() } = options;
+  const {
+    startTimestamp,
+    variant = 0,
+    imageVariant = 0,
+    includeType = true,
+    includeStatusDisplay = true,
+    appIcon = "",
+    context = {},
+    now = Date.now()
+  } = options;
   const textContext = { now, ...context };
   validateButtons(config);
-  validateImage(config.largeImageKey, "Imagem grande");
-  validateImage(config.smallImageKey, "Imagem pequena");
+  validateImages(config);
 
   const activity = { instance: false };
   const type = ACTIVITY_TYPES[config.activityType] || 0;
@@ -109,13 +144,19 @@ function buildActivity(config, options = {}) {
   const state = presenceText(resolveText(text.state, textContext));
   if (state) activity.state = state;
 
+  if (includeStatusDisplay) {
+    const display = statusDisplayType(config.statusDisplay, activity);
+    if (display) activity.status_display_type = display;
+  }
+
+  const images = imageVariants(config);
+  const image = images[Math.abs(Math.trunc(imageVariant)) % images.length];
   const assets = {};
-  const largeImage = String(config.largeImageKey || "").trim() || String(appIcon || "").slice(0, 256);
+  const largeImage = image.large || String(appIcon || "").slice(0, 256);
   if (largeImage) assets.large_image = largeImage;
   const largeText = presenceText(resolveText(config.largeImageText, textContext));
   if (largeText) assets.large_text = largeText;
-  const smallImage = String(config.smallImageKey || "").trim();
-  if (smallImage) assets.small_image = smallImage;
+  if (image.small) assets.small_image = image.small;
   const smallText = presenceText(resolveText(config.smallImageText, textContext));
   if (smallText) assets.small_text = smallText;
   if (Object.keys(assets).length) activity.assets = assets;
@@ -132,6 +173,7 @@ module.exports = {
   ACTIVITY_TYPES,
   buildActivity,
   buildButtons,
+  imageVariants,
   isImageUrl,
   rotationIntervalMs,
   textVariants
