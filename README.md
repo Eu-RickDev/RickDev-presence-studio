@@ -6,7 +6,7 @@
   Rich Presence personalizada no Discord, sem mexer em código.
 
   <p>
-    <img src="https://img.shields.io/badge/versão-1.3.0-5865F2?style=for-the-badge" alt="Versão 1.3.0">
+    <img src="https://img.shields.io/badge/versão-1.4.0-5865F2?style=for-the-badge" alt="Versão 1.4.0">
     <img src="https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows" alt="Plataforma Windows">
   </p>
 </div>
@@ -16,6 +16,8 @@
 ## O que dá para fazer
 
 - Montar a atividade com textos, imagens, até dois botões e cronômetro, vendo o resultado na pré-visualização
+- Alternar textos e imagens sozinhos, cada um no seu intervalo
+- Escolher o que aparece ao seu lado na lista de membros: o nome do app, os detalhes ou o estado
 - Guardar cinco perfis e trocar entre eles pela janela ou pelo ícone da bandeja
 - Mostrar a música ou o vídeo que está tocando no Windows (Spotify, YouTube Music, navegadores e outros players)
 - Usar variáveis como `{hora}` e `{música}` nos textos
@@ -36,6 +38,10 @@ O portátil leva alguns segundos para abrir, porque se descompacta a cada vez. A
 3. Com o Discord aberto, preencha os campos e clique em **Ativar presence**.
 
 Para as imagens, use a chave de um asset enviado em **Rich Presence Assets** no Developer Portal ou um link `https://` direto para a imagem. Sem imagem, aparece o ícone da aplicação.
+
+Com **Alternar imagens** ligado, preencha as variações e escolha o intervalo. Um campo vazio mantém a imagem principal, então dá para trocar só a grande ou só a pequena.
+
+Em **Na lista de membros**, escolha o que aparece ao lado do seu nome: o nome do app (padrão), os detalhes ou o estado. Com Detalhes, aparece "Ouvindo Copines" em vez de "Ouvindo Spotify".
 
 ## Variáveis
 
@@ -60,7 +66,8 @@ Ligado, ele mostra o que está tocando como **Ouvindo** ou, para vídeos, **Assi
 - **Mostrar como Jogando**: o Discord só mostra o ícone da aplicação ao lado do seu nome quando a atividade é "Jogando".
 - **Nome do player na atividade**: aparece "Ouvindo YouTube Music" no lugar do nome da aplicação.
 - **Botão da música**: um botão para quem vê seu perfil abrir a faixa.
-- Em **Fontes**, você bloqueia um app ou marca como vídeo.
+- **Mídia discreta**: esconde título, artista e capa de todas as fontes do perfil. Aparece só "Música" ou "Vídeo", com o player e o tempo.
+- Em **Fontes**, você bloqueia um app, marca como vídeo ou deixa só ele discreto com **Discreta**.
 
 O navegador aparece como uma fonte só, e o Windows não diz se é vídeo ou música. Para separar o YouTube do YouTube Music, instale o YouTube Music como app pelo Chrome ou pelo Edge.
 
