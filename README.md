@@ -11,6 +11,8 @@
   </p>
 </div>
 
+![Tela principal do RickDev Presence Studio, com o perfil Programando ativo e a pré-visualização da atividade](docs/imagens/tela-principal.png)
+
 ---
 
 ## O que dá para fazer
@@ -47,6 +49,8 @@ Em **Na lista de membros**, escolha o que aparece ao lado do seu nome: o nome do
 
 Clique na seta ao lado de **Variáveis**, abaixo dos campos de texto, e escolha uma para inserir no campo em que você estava.
 
+![Campos de texto com as variáveis {dia}, {data} e {hora} e a pré-visualização mostrando os valores](docs/imagens/variaveis.png)
+
 | Variável | Exemplo |
 | --- | --- |
 | `{hora}` | 14:35 |
@@ -62,6 +66,8 @@ Hora, data e dia se atualizam sozinhos, no máximo uma vez por minuto. Se nada e
 
 Ligado, ele mostra o que está tocando como **Ouvindo** ou, para vídeos, **Assistindo**, com capa, álbum e barra de progresso. Quando para de tocar, volta para a presence do perfil.
 
+![Aba Modo de mídia com uma música tocando no Spotify, as opções do modo e a lista de fontes](docs/imagens/modo-de-midia.png)
+
 - A capa é buscada no iTunes e no Deezer. Dá para desligar em **Buscar capa do álbum**.
 - **Mostrar como Jogando**: o Discord só mostra o ícone da aplicação ao lado do seu nome quando a atividade é "Jogando".
 - **Nome do player na atividade**: aparece "Ouvindo YouTube Music" no lugar do nome da aplicação.
@@ -74,6 +80,8 @@ O navegador aparece como uma fonte só, e o Windows não diz se é vídeo ou mú
 ## Automação
 
 Nas **Preferências**, crie até 10 regras que ativam um perfil enquanto um programa está aberto (como `obs64.exe`) ou num horário. Vale a primeira regra da lista, e o perfil anterior volta quando ela para de valer. A automação só age com a presence ativa.
+
+![Preferências com a opção de ausência e três regras de automação](docs/imagens/automacao.png)
 
 ## Problemas comuns
 
