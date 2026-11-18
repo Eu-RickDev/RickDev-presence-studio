@@ -1040,35 +1040,35 @@ async function submitPresence() {
   }
 }
 
-async function exportProfiles() {
+async function exportProfile() {
   if (!profileStore) return;
   exportProfilesButton.disabled = true;
   try {
     await flushProfiles();
-    const result = await window.presenceAPI.exportProfiles();
-    if (result?.ok) showToast("Perfis exportados.");
-    else if (!result?.canceled) showToast(result?.error || "Não foi possível exportar os perfis.", 4500);
+    const result = await window.presenceAPI.exportProfile(activeProfile);
+    if (result?.ok) showToast(`${result.name} exportado.`);
+    else if (!result?.canceled) showToast(result?.error || "Não foi possível exportar o perfil.", 4500);
   } catch (error) {
-    showToast(error?.message || "Não foi possível exportar os perfis.", 4500);
+    showToast(error?.message || "Não foi possível exportar o perfil.", 4500);
   } finally {
     exportProfilesButton.disabled = false;
   }
 }
 
-async function importProfiles() {
+async function importProfile() {
   if (!profileStore) return;
   importProfilesButton.disabled = true;
   try {
     await flushProfiles();
-    const result = await window.presenceAPI.importProfiles();
+    const result = await window.presenceAPI.importProfile(activeProfile);
     if (result?.ok) {
       applyStore(result.store);
-      showToast(result.count === 1 ? "1 perfil importado." : `${result.count} perfis importados.`);
+      showToast(`${result.name} importado.`);
     } else if (!result?.canceled) {
-      showToast(result?.error || "Não foi possível importar os perfis.", 4500);
+      showToast(result?.error || "Não foi possível importar o perfil.", 4500);
     }
   } catch (error) {
-    showToast(error?.message || "Não foi possível importar os perfis.", 4500);
+    showToast(error?.message || "Não foi possível importar o perfil.", 4500);
   } finally {
     importProfilesButton.disabled = false;
   }
@@ -1198,8 +1198,8 @@ profileTabs.forEach((button) => {
   });
 });
 
-importProfilesButton.addEventListener("click", importProfiles);
-exportProfilesButton.addEventListener("click", exportProfiles);
+importProfilesButton.addEventListener("click", importProfile);
+exportProfilesButton.addEventListener("click", exportProfile);
 connectButton.addEventListener("click", submitPresence);
 
 document.querySelector("#previewButtons").addEventListener("click", (event) => {

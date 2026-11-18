@@ -6,11 +6,15 @@ const { compareVersions } = require("./version");
 const { createStartupManager } = require("./startup");
 const {
   MAX_IMPORT_BYTES,
-  buildProfilesExport,
+  PROFILE_COUNT,
+  buildProfileExport,
   createConfigStore,
   defaultSettings,
   normalizeConfig,
   parseProfilesImport,
+  profileChoiceLabels,
+  profileFileName,
+  replaceProfile,
   writeJsonAtomic
 } = require("./config");
 const {
@@ -1305,23 +1309,31 @@ function profileFileFilters() {
   return [{ name: "Perfis do RickDev Presence Studio", extensions: ["json"] }];
 }
 
-async function exportProfiles() {
-  const store = loadConfig();
+function profileIndex(value) {
+  if (!Number.isInteger(value) || value < 0 || value >= PROFILE_COUNT) {
+    throw new Error("Perfil inválido.");
+  }
+  return value;
+}
+
+async function exportProfile(index) {
+  const profile = loadConfig().profiles[profileIndex(index)];
   const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-    title: "Exportar perfis",
+    title: "Exportar perfil",
     buttonLabel: "Exportar",
-    defaultPath: path.join(app.getPath("documents"), "rickdev-presence-perfis.json"),
+    defaultPath: path.join(app.getPath("documents"), profileFileName(profile.name)),
     filters: profileFileFilters()
   });
   if (canceled || !filePath) return { ok: false, canceled: true };
 
-  writeJsonAtomic(filePath, buildProfilesExport(store, app.getVersion()));
-  return { ok: true, filePath, count: store.profiles.length };
+  writeJsonAtomic(filePath, buildProfileExport(profile, app.getVersion()));
+  return { ok: true, filePath, name: profile.name };
 }
 
-async function importProfiles() {
+async function importProfile(index) {
+  const target = profileIndex(index);
   const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: "Importar perfis",
+    title: "Importar perfil",
     buttonLabel: "Importar",
     properties: ["openFile"],
     filters: profileFileFilters()
@@ -1332,31 +1344,29 @@ async function importProfiles() {
   if (fs.statSync(filePath).size > MAX_IMPORT_BYTES) {
     throw new Error("O arquivo é grande demais para ser um arquivo de perfis.");
   }
-  const imported = parseProfilesImport(fs.readFileSync(filePath, "utf8"));
+  const { profiles } = parseProfilesImport(fs.readFileSync(filePath, "utf8"));
+  const openName = loadConfig().profiles[target].name;
+  const single = profiles.length === 1;
 
   const { response } = await dialog.showMessageBox(mainWindow, {
-    type: "warning",
-    title: "Importar perfis",
-    message: imported.count === 1
-      ? "Substituir os perfis atuais pelo perfil do arquivo?"
-      : `Substituir os perfis atuais pelos ${imported.count} perfis do arquivo?`,
-    detail: "Os 5 perfis atuais serão substituídos. Para guardar uma cópia, exporte-os antes. "
+    type: single ? "warning" : "question",
+    title: "Importar perfil",
+    message: single
+      ? `Substituir “${openName}” pelo perfil “${profiles[0].name}” do arquivo?`
+      : `Qual perfil do arquivo vai substituir “${openName}”?`,
+    detail: "Só o perfil aberto muda. Os outros perfis, a automação e a ausência continuam como estão. "
       + "A presence ativa só muda quando você clicar em Atualizar presence.",
-    buttons: ["Importar", "Cancelar"],
+    buttons: single ? ["Substituir", "Cancelar"] : [...profileChoiceLabels(profiles), "Cancelar"],
     defaultId: 0,
-    cancelId: 1,
-    noLink: true
+    cancelId: single ? 1 : profiles.length,
+    noLink: single
   });
-  if (response !== 0) return { ok: false, canceled: true };
+  const chosen = single ? (response === 0 ? profiles[0] : undefined) : profiles[response];
+  if (!chosen) return { ok: false, canceled: true };
 
-  const current = loadConfig();
-  const normalized = saveConfig({
-    ...current,
-    activeProfile: imported.activeProfile,
-    profiles: imported.profiles
-  });
+  const normalized = saveConfig(replaceProfile(loadConfig(), target, chosen));
   rememberProfileNames(normalized);
-  return { ok: true, count: imported.count, store: { ...normalized, startupStatus } };
+  return { ok: true, name: normalized.profiles[target].name, store: { ...normalized, startupStatus } };
 }
 
 function createSplash() {
@@ -1666,18 +1676,18 @@ app.whenReady().then(async () => {
 
     return { ...normalized, startupStatus };
   });
-  ipcMain.handle("profiles:export", async () => {
+  ipcMain.handle("profiles:export", async (_event, index) => {
     try {
-      return await exportProfiles();
+      return await exportProfile(index);
     } catch (error) {
-      return { ok: false, error: error.message || "Não foi possível exportar os perfis." };
+      return { ok: false, error: error.message || "Não foi possível exportar o perfil." };
     }
   });
-  ipcMain.handle("profiles:import", async () => {
+  ipcMain.handle("profiles:import", async (_event, index) => {
     try {
-      return await importProfiles();
+      return await importProfile(index);
     } catch (error) {
-      return { ok: false, error: error.message || "Não foi possível importar os perfis." };
+      return { ok: false, error: error.message || "Não foi possível importar o perfil." };
     }
   });
   ipcMain.handle("application:lookup", (_event, clientId) => lookupApplication(clientId));

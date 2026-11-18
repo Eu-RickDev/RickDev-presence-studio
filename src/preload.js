@@ -3,8 +3,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("presenceAPI", {
   loadConfig: () => ipcRenderer.invoke("config:load"),
   saveConfig: (config) => ipcRenderer.invoke("config:save", config),
-  exportProfiles: () => ipcRenderer.invoke("profiles:export"),
-  importProfiles: () => ipcRenderer.invoke("profiles:import"),
+  exportProfile: (index) => ipcRenderer.invoke("profiles:export", index),
+  importProfile: (index) => ipcRenderer.invoke("profiles:import", index),
   lookupApplication: (clientId) => ipcRenderer.invoke("application:lookup", clientId),
   connect: (config) => ipcRenderer.invoke("presence:connect", config),
   disconnect: () => ipcRenderer.invoke("presence:disconnect"),
