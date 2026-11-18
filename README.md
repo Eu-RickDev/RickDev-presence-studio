@@ -6,7 +6,7 @@
   Rich Presence personalizada no Discord, sem mexer em código.
 
   <p>
-    <img src="https://img.shields.io/badge/versão-1.4.1-5865F2?style=for-the-badge" alt="Versão 1.4.1">
+    <img src="https://img.shields.io/badge/versão-1.5.0-5865F2?style=for-the-badge" alt="Versão 1.5.0">
     <img src="https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows" alt="Plataforma Windows">
   </p>
 </div>
