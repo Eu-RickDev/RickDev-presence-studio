@@ -5,7 +5,7 @@ const { normalizeAutomationRules } = require("./automation");
 const PROFILE_COUNT = 5;
 const CONFIG_FILE = "presence-config.json";
 const EXPORT_FORMAT = "rickdev-presence-profiles";
-const EXPORT_FORMAT_VERSION = 1;
+const EXPORT_FORMAT_VERSION = 2;
 const MAX_IMPORT_BYTES = 1024 * 1024;
 const AWAY_ACTIONS = ["off", "hide", ...Array.from({ length: PROFILE_COUNT }, (_item, index) => `profile-${index}`)];
 const AWAY_MINUTES = [5, 10, 15, 30, 60];
@@ -271,16 +271,43 @@ function createConfigStore(getDirectory, options = {}) {
   return { configPath, load, save };
 }
 
-function buildProfilesExport(store, appVersion, now = new Date()) {
-  const normalized = normalizeProfiles(store);
+function buildProfileExport(profile, appVersion, now = new Date()) {
   return {
     format: EXPORT_FORMAT,
     formatVersion: EXPORT_FORMAT_VERSION,
     appVersion: String(appVersion || ""),
     exportedAt: now.toISOString(),
-    activeProfile: normalized.activeProfile,
-    profiles: normalized.profiles
+    profiles: [normalizeProfile(profile, 0)]
   };
+}
+
+function isDefaultProfileName(name) {
+  const match = /^Perfil (\d+)$/.exec(String(name || "").trim());
+  return !String(name || "").trim() || Boolean(match && Number(match[1]) >= 1 && Number(match[1]) <= PROFILE_COUNT);
+}
+
+function replaceProfile(store, index, profile) {
+  const normalized = normalizeProfiles(store);
+  const incoming = isDefaultProfileName(profile?.name) ? { ...profile, name: "" } : profile;
+  return {
+    ...normalized,
+    profiles: normalized.profiles.map((current, position) => (position === index ? normalizeProfile(incoming, index) : current))
+  };
+}
+
+function profileChoiceLabels(profiles) {
+  return profiles.map((profile, index) => `${index + 1}. ${String(profile.name).replace(/&/g, "&&")}`);
+}
+
+function profileFileName(name) {
+  const slug = String(name || "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .slice(0, 40)
+    .replace(/^-+|-+$/g, "");
+  return `rickdev-presence-${slug || "perfil"}.json`;
 }
 
 // Accepts files exported by the Studio and the app's own presence-config.json.
@@ -303,25 +330,20 @@ function parseProfilesImport(text) {
     throw new Error("Este arquivo foi exportado por uma versão mais nova do Studio. Atualize o aplicativo para importá-lo.");
   }
 
-  const profiles = Array.isArray(data?.profiles) ? data.profiles.slice(0, PROFILE_COUNT) : [];
-  const count = profiles.filter((profile) => profile && typeof profile === "object").length;
-  if (!count) {
+  const profiles = (Array.isArray(data?.profiles) ? data.profiles.slice(0, PROFILE_COUNT) : [])
+    .filter((profile) => profile && typeof profile === "object");
+  if (!profiles.length) {
     throw new Error("Nenhum perfil foi encontrado no arquivo.");
   }
 
-  const normalized = normalizeProfiles({ activeProfile: data.activeProfile, profiles });
-  return {
-    activeProfile: normalized.activeProfile,
-    profiles: normalized.profiles,
-    count
-  };
+  return { profiles: profiles.map(normalizeProfile) };
 }
 
 module.exports = {
   EXPORT_FORMAT,
   MAX_IMPORT_BYTES,
   PROFILE_COUNT,
-  buildProfilesExport,
+  buildProfileExport,
   createConfigStore,
   defaultSettings,
   defaults,
@@ -329,5 +351,8 @@ module.exports = {
   normalizeProfiles,
   normalizeSettings,
   parseProfilesImport,
+  profileChoiceLabels,
+  profileFileName,
+  replaceProfile,
   writeJsonAtomic
 };

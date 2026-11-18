@@ -89,4 +89,4 @@ Nas **Preferências**, crie até 10 regras que ativam um perfil enquanto um prog
 - **O Discord encerrou a conexão**: confira o Application ID.
 - **Imagem não aparece**: a chave precisa ser igual à do Developer Portal, e assets novos podem levar alguns minutos. Links precisam apontar direto para a imagem.
 - **Botões não aparecem**: o Discord não mostra seus botões para você mesmo. Veja seu perfil por outra conta.
-- **Perfis voltaram ao padrão**: o arquivo antigo fica salvo como `presence-config.corrompido-<data>.json` em `%APPDATA%`. Use **Exportar perfis** para ter um backup.
+- **Perfis voltaram ao padrão**: o arquivo antigo fica salvo como `presence-config.corrompido-<data>.json` em `%APPDATA%`. Use **Exportar perfil** para guardar uma cópia de cada perfil.
