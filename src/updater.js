@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { compareVersions } = require("./version");
 
 const DOWNLOAD_PREFIX = "https://github.com/";
 const UPDATE_FILE_PREFIX = "RickDev Presence Studio ";
@@ -67,6 +68,25 @@ function expectedSha256(release, asset) {
   if (digest) return digest[1].toLowerCase();
   const note = /SHA-?256\W{0,12}([0-9a-f]{64})\b/i.exec(String(release?.body || ""));
   return note ? note[1].toLowerCase() : "";
+}
+
+function describeUpdate(release, currentVersion, repository) {
+  if (!release || release.draft || compareVersions(currentVersion, release.tag_name) <= 0) return undefined;
+
+  const version = String(release.tag_name || "").replace(/^v/i, "");
+  const asset = pickReleaseAsset(release);
+  const sha256 = expectedSha256(release, asset);
+  return {
+    version,
+    name: release.name || `RickDev Presence Studio ${release.tag_name}`,
+    notes: String(release.body || "Esta versão não possui notas de lançamento.").slice(0, 20000),
+    url: /^https:\/\/github\.com\//i.test(release.html_url || "")
+      ? release.html_url
+      : `https://github.com/${repository}/releases/latest`,
+    download: asset && sha256
+      ? { version, url: asset.browser_download_url, size: Number(asset.size), sha256 }
+      : undefined
+  };
 }
 
 function updateFileName(version) {
@@ -175,6 +195,7 @@ async function cleanupDownloads(directory, keepPath = "", fileSystem = fs.promis
 module.exports = {
   APPLY_SCRIPT,
   cleanupDownloads,
+  describeUpdate,
   downloadUpdate,
   expectedSha256,
   launchUpdate,

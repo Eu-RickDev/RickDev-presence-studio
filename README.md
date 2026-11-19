@@ -25,7 +25,7 @@
 - Usar variáveis como `{hora}` e `{música}` nos textos
 - Trocar o perfil sozinho quando um programa abre ou num horário
 - Ocultar a presence ou trocar de perfil quando você fica ausente
-- Atualizar o app com um clique quando sai versão nova
+- Atualizar o app com um clique quando sai versão nova, ou procurar uma na hora em **Preferências**
 
 ## Download
 
@@ -69,6 +69,7 @@ Ligado, ele mostra o que está tocando como **Ouvindo** ou, para vídeos, **Assi
 ![Aba Modo de mídia com uma música tocando no Spotify, as opções do modo e a lista de fontes](docs/imagens/modo-de-midia.png)
 
 - A capa é buscada no iTunes e no Deezer. Dá para desligar em **Buscar capa do álbum**.
+- **Ícone do player**: mostra o ícone do Spotify, do YouTube Music e de outros players na imagem pequena. Com **Ícone na imagem grande**, ele ocupa o lugar da capa.
 - **Mostrar como Jogando**: o Discord só mostra o ícone da aplicação ao lado do seu nome quando a atividade é "Jogando".
 - **Nome do player na atividade**: aparece "Ouvindo YouTube Music" no lugar do nome da aplicação.
 - **Botão da música**: um botão para quem vê seu perfil abrir a faixa.

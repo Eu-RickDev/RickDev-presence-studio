@@ -297,9 +297,17 @@
 
                 <label class="toggle-row">
                   <div>
-                    <strong>Ícone do player <span class="info" tabindex="0" data-tip="Mostra na imagem pequena o ícone do Spotify, YouTube Music, Deezer e outros players conhecidos, quando o perfil não tem imagem pequena. Vale para este perfil."></span></strong>
+                    <strong>Ícone do player <span class="info" tabindex="0" data-tip="Mostra o ícone do Spotify, YouTube Music, Deezer e outros players conhecidos. Na imagem pequena, ele aparece só quando o perfil não tem uma. Vale para este perfil."></span></strong>
                   </div>
                   <input id="musicPlayerIcon" name="musicPlayerIcon" type="checkbox">
+                  <i></i>
+                </label>
+
+                <label class="toggle-row sub-row" id="musicPlayerIconLargeRow">
+                  <div>
+                    <strong>Ícone na imagem grande <span class="info" tabindex="0" data-tip="Mostra o ícone do player na imagem grande, no lugar da capa, enquanto a mídia toca. Desligado, o ícone fica na imagem pequena quando o perfil não tem uma. Vale para este perfil."></span></strong>
+                  </div>
+                  <input id="musicPlayerIconLarge" name="musicPlayerIconLarge" type="checkbox">
                   <i></i>
                 </label>
 
@@ -489,6 +497,18 @@
             <div class="automation-rules" id="automationRules"></div>
             <button class="ghost-button add-rule" id="addRuleButton" type="button"><i class="icon icon-plus"></i>Adicionar regra</button>
             <datalist id="processList"></datalist>
+          </section>
+
+          <section class="settings-section">
+            <h3 class="section-title">Atualização <span class="info" tabindex="0" data-tip="O Studio procura uma versão nova sempre que abre. Use o botão para procurar agora."></span></h3>
+            <div class="card list-card">
+              <div class="setting-row">
+                <div>
+                  <strong id="settingsVersion">Versão em uso</strong>
+                </div>
+                <button class="secondary-button" id="checkUpdateButton" type="button">Buscar atualização</button>
+              </div>
+            </div>
           </section>
         </div>
       </section>

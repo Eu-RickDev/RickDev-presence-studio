@@ -264,20 +264,24 @@ function buildMusicActivity(config, media, options = {}) {
   }
 
   const assets = {};
-  const largeImage = (discreet ? "" : String(artUrl || "").slice(0, 256))
+  const iconLarge = Boolean(config.musicPlayerIconLarge && playerIcon?.icon);
+  const largeImage = (iconLarge ? playerIcon.icon.slice(0, 256) : "")
+    || (discreet ? "" : String(artUrl || "").slice(0, 256))
     || String(config.largeImageKey || "").trim()
     || String(appIcon || "").slice(0, 256);
   if (largeImage) assets.large_image = largeImage;
   const textContext = discreet ? { now, ...context } : { now, media, ...context };
   const album = discreet ? "" : presenceText(media.album);
-  const largeText = album || presenceText(resolveText(config.largeImageText, textContext));
+  const largeText = album || (iconLarge
+    ? presenceText(playerIcon.name)
+    : presenceText(resolveText(config.largeImageText, textContext)));
   if (largeText) assets.large_text = largeText;
   const smallImage = String(config.smallImageKey || "").trim();
   if (smallImage) {
     assets.small_image = smallImage;
     const smallText = presenceText(resolveText(config.smallImageText, textContext));
     if (smallText) assets.small_text = smallText;
-  } else if (playerIcon?.icon) {
+  } else if (playerIcon?.icon && !iconLarge) {
     assets.small_image = playerIcon.icon.slice(0, 256);
     const smallText = presenceText(playerIcon.name);
     if (smallText) assets.small_text = smallText;
@@ -301,6 +305,25 @@ function buildMusicActivity(config, media, options = {}) {
 
   if (buttons.length) activity.buttons = buttons;
   return activity;
+}
+
+function withoutPlayerIcon(activity, icon, fallbackImage = "") {
+  const assets = { ...activity.assets };
+  if (assets.small_image === icon) {
+    delete assets.small_image;
+    delete assets.small_text;
+  }
+  if (assets.large_image === icon) {
+    if (fallbackImage) {
+      assets.large_image = fallbackImage;
+    } else {
+      delete assets.large_image;
+      delete assets.large_text;
+    }
+  }
+  const next = { ...activity, assets };
+  if (!Object.keys(assets).length) delete next.assets;
+  return next;
 }
 
 function createMediaWatcher(options = {}) {
@@ -414,5 +437,6 @@ module.exports = {
   parseMediaLine,
   playerFromWindows,
   presenceText,
-  selectMediaSession
+  selectMediaSession,
+  withoutPlayerIcon
 };
