@@ -2,7 +2,6 @@ const { app, BrowserWindow, dialog, ipcMain, shell, Menu, Tray, net, powerMonito
 const path = require("path");
 const fs = require("fs");
 const DiscordRPC = require("discord-rpc");
-const { compareVersions } = require("./version");
 const { createStartupManager } = require("./startup");
 const {
   MAX_IMPORT_BYTES,
@@ -23,7 +22,8 @@ const {
   derivePresentation,
   hasSeeked,
   mediaSignature,
-  selectMediaSession
+  selectMediaSession,
+  withoutPlayerIcon
 } = require("./media");
 const { EMPTY_TRACK_INFO, fetchTrackInfo } = require("./artwork");
 const { buildActivity, buildButtons, imageVariants, rotationIntervalMs, textVariants } = require("./activity");
@@ -38,10 +38,9 @@ const {
 } = require("./automation");
 const {
   cleanupDownloads,
+  describeUpdate,
   downloadUpdate,
-  expectedSha256,
   launchUpdate,
-  pickReleaseAsset,
   updateFileName
 } = require("./updater");
 
@@ -261,28 +260,29 @@ async function fetchLatestRelease() {
   }
 }
 
+async function findUpdate() {
+  const release = await fetchLatestRelease();
+  if (!release) throw new Error("Não foi possível consultar as versões.");
+  const found = describeUpdate(release, app.getVersion(), githubRepository);
+  availableUpdate = found?.download;
+  if (!found) return undefined;
+  const { download, ...details } = found;
+  return { ...details, currentVersion: app.getVersion(), canInstall: Boolean(download && updateInstallSupported()) };
+}
+
+async function checkUpdateNow() {
+  try {
+    const update = await findUpdate();
+    return update ? { status: "available", update } : { status: "latest", version: app.getVersion() };
+  } catch {
+    return { status: "error" };
+  }
+}
+
 async function checkForUpdates() {
   try {
-    const release = await fetchLatestRelease();
-    if (!release || release.draft || compareVersions(app.getVersion(), release.tag_name) <= 0) return;
-
-    const version = String(release.tag_name || "").replace(/^v/i, "");
-    const asset = pickReleaseAsset(release);
-    const sha256 = expectedSha256(release, asset);
-    availableUpdate = asset && sha256
-      ? { version, url: asset.browser_download_url, size: Number(asset.size), sha256 }
-      : undefined;
-
-    const update = {
-      currentVersion: app.getVersion(),
-      version,
-      name: release.name || `RickDev Presence Studio ${release.tag_name}`,
-      notes: String(release.body || "Esta versão não possui notas de lançamento.").slice(0, 20000),
-      url: /^https:\/\/github\.com\//i.test(release.html_url || "")
-        ? release.html_url
-        : `https://github.com/${githubRepository}/releases/latest`,
-      canInstall: Boolean(availableUpdate && updateInstallSupported())
-    };
+    const update = await findUpdate();
+    if (!update) return;
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("update:available", update);
@@ -626,13 +626,6 @@ function isActivityValidationError(error) {
 // degrade one feature at a time and remember what this session supports.
 // Discord's validation errors name the failing field, so blame the cover
 // first when the message points at the assets instead of burning the type.
-function withoutAsset(activity, ...keys) {
-  const next = { ...activity, assets: { ...activity.assets } };
-  for (const key of keys) delete next.assets[key];
-  if (!Object.keys(next.assets).length) delete next.assets;
-  return next;
-}
-
 async function sendActivity(activity, { artUrl = "", fallbackImage = "", playerIcon = "" } = {}) {
   let current = activity;
 
@@ -644,10 +637,10 @@ async function sendActivity(activity, { artUrl = "", fallbackImage = "", playerI
       if (!isActivityValidationError(error)) throw error;
 
       const message = String(error?.message || error);
-      const carriesPlayerIcon = Boolean(playerIcon) && current.assets?.small_image === playerIcon;
-      if (carriesPlayerIcon && /small/i.test(message)) {
+      const playerIconSlot = ["small", "large"].find((slot) => playerIcon && current.assets?.[`${slot}_image`] === playerIcon);
+      if (playerIconSlot && new RegExp(playerIconSlot, "i").test(message)) {
         playerIconSupported = false;
-        current = withoutAsset(current, "small_image", "small_text");
+        current = withoutPlayerIcon(current, playerIcon, artUrl || fallbackImage);
         continue;
       }
 
@@ -692,9 +685,9 @@ async function sendActivity(activity, { artUrl = "", fallbackImage = "", playerI
         continue;
       }
 
-      if (carriesPlayerIcon && /assets|image/i.test(message)) {
+      if (playerIconSlot && /assets|image/i.test(message)) {
         playerIconSupported = false;
-        current = withoutAsset(current, "small_image", "small_text");
+        current = withoutPlayerIcon(current, playerIcon, artUrl || fallbackImage);
         continue;
       }
 
@@ -1715,6 +1708,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("presence:disconnect", () => disconnect());
   ipcMain.handle("automation:processes", async () => [...(await listProcesses()) || []].sort());
   ipcMain.handle("update:install", () => installUpdate());
+  ipcMain.handle("update:check", () => checkUpdateNow());
 
   setInterval(checkAway, AWAY_CHECK_INTERVAL_MS).unref();
   setInterval(refreshTray, TRAY_REFRESH_INTERVAL_MS).unref();

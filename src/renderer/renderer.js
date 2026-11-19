@@ -27,6 +27,8 @@ const updateNotes = document.querySelector("#updateNotes");
 const toast = document.querySelector("#toast");
 const appVersion = document.querySelector("#appVersion");
 const timerFields = document.querySelector("#timerFields");
+const musicPlayerIconLargeRow = document.querySelector("#musicPlayerIconLargeRow");
+const checkUpdateButton = document.querySelector("#checkUpdateButton");
 const timerTimeField = document.querySelector("#timerTimeField");
 const timerModeInfo = document.querySelector("#timerModeInfo");
 const variableBar = document.querySelector("#variableBar");
@@ -626,11 +628,17 @@ function renderPreview() {
   const images = previewImageVariants(config);
   if (previewImageVariant >= images.length) previewImageVariant = 0;
   const image = music ? images[0] : images[previewImageVariant];
-  const player = music && config.musicPlayerIcon && !image.small ? PresenceFormat.playerInfo(music.player || music.app) : undefined;
-  const largeImageUrl = (discreet ? "" : music?.artUrl)
+  const iconLarge = Boolean(config.musicPlayerIconLarge);
+  const player = music && config.musicPlayerIcon && (iconLarge || !image.small)
+    ? PresenceFormat.playerInfo(music.player || music.app)
+    : undefined;
+  const largePlayer = iconLarge ? player : undefined;
+  const smallPlayer = iconLarge ? undefined : player;
+  const largeImageUrl = largePlayer?.icon
+    || (discreet ? "" : music?.artUrl)
     || previewImage(image.large, matchingApplication)
     || (!image.large ? matchingApplication?.iconUrl : "");
-  const smallImageUrl = player?.icon || previewImage(image.small, matchingApplication);
+  const smallImageUrl = smallPlayer?.icon || previewImage(image.small, matchingApplication);
   const variants = previewVariants(config);
   if (previewVariant >= variants.length) previewVariant = 0;
   const text = variants[previewVariant];
@@ -642,6 +650,7 @@ function renderPreview() {
   rotationFields.hidden = !config.rotateTexts;
   imageRotationFields.hidden = !config.rotateImages;
   timerFields.hidden = !config.showTimer;
+  musicPlayerIconLargeRow.hidden = !config.musicPlayerIcon;
   timerTimeField.hidden = config.timerMode === "elapsed";
   setInfo(timerModeInfo, TIMER_NOTES[config.timerMode] || TIMER_NOTES.elapsed);
   document.querySelector("#previewMode").textContent = music
@@ -678,8 +687,9 @@ function renderPreview() {
     : image.large && !largeKeyIsLink
       ? image.large.slice(0, 2).toUpperCase()
       : matchingApplication?.name?.slice(0, 1).toUpperCase() || "R";
+  document.querySelector("#largeAsset").title = largePlayer?.name || "";
   setPreviewImage("#largeAsset", "#largeAssetImage", largeImageUrl, "Imagem grande da presence");
-  document.querySelector("#smallAsset").title = player?.name || "";
+  document.querySelector("#smallAsset").title = smallPlayer?.name || "";
   setPreviewImage("#smallAsset", "#smallAssetImage", smallImageUrl, "Imagem pequena da presence");
   document.querySelector("#previewTimer").style.display = !music && config.showTimer ? "block" : "none";
   renderTimer(config);
@@ -1012,6 +1022,27 @@ function closeSettings() {
   settingsButton.focus();
 }
 
+async function checkUpdate() {
+  checkUpdateButton.disabled = true;
+  checkUpdateButton.textContent = "Buscando...";
+  try {
+    const result = await window.presenceAPI.checkUpdate();
+    if (result?.status === "available") {
+      closeSettings();
+      showUpdate(result.update);
+    } else if (result?.status === "latest") {
+      showToast(`Você já tem a versão mais recente (${result.version}).`);
+    } else {
+      showToast("Não foi possível buscar atualização. Confira a internet e tente de novo.");
+    }
+  } catch {
+    showToast("Não foi possível buscar atualização. Confira a internet e tente de novo.");
+  } finally {
+    checkUpdateButton.disabled = false;
+    checkUpdateButton.textContent = "Buscar atualização";
+  }
+}
+
 async function submitPresence() {
   const config = getConfig();
   if (!config.clientId.trim()) {
@@ -1235,6 +1266,7 @@ document.querySelector("#portalLink").addEventListener("click", (event) => {
 
 document.querySelector("#updateCloseButton").addEventListener("click", closeUpdate);
 updateLaterButton.addEventListener("click", closeUpdate);
+checkUpdateButton.addEventListener("click", checkUpdate);
 updateOpenButton.addEventListener("click", () => {
   if (updateUrl) window.presenceAPI.openLink(updateUrl);
   if (!installingUpdate) closeUpdate();
@@ -1414,6 +1446,7 @@ window.presenceAPI.loadConfig().then((store) => {
   if (store.appVersion) {
     appVersion.textContent = `v${store.appVersion}`;
     appVersion.hidden = false;
+    document.querySelector("#settingsVersion").textContent = `Versão ${store.appVersion}`;
   }
   if (store.presenceStatus) setStatus(store.presenceStatus);
   if (store.updated) showToast(`Atualizado para a versão ${store.appVersion}.`, 5000);

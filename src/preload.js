@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("presenceAPI", {
   watchMusic: (enabled) => ipcRenderer.invoke("music:watch", enabled),
   listProcesses: () => ipcRenderer.invoke("automation:processes"),
   installUpdate: () => ipcRenderer.invoke("update:install"),
+  checkUpdate: () => ipcRenderer.invoke("update:check"),
   ready: () => ipcRenderer.send("ui:ready"),
   onStatus: (callback) => ipcRenderer.on("presence:status", (_event, data) => callback(data)),
   onMusicState: (callback) => ipcRenderer.on("music:state", (_event, data) => callback(data)),

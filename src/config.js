@@ -59,6 +59,7 @@ const defaults = {
   highPriority: false,
   musicMode: false,
   musicPlayerIcon: true,
+  musicPlayerIconLarge: false,
   musicAsPlaying: false,
   musicPlayerName: false,
   musicDiscreet: false,
