@@ -30,6 +30,7 @@ const timerFields = document.querySelector("#timerFields");
 const musicPlayerIconLargeRow = document.querySelector("#musicPlayerIconLargeRow");
 const checkUpdateButton = document.querySelector("#checkUpdateButton");
 const timerTimeField = document.querySelector("#timerTimeField");
+const timerStartField = document.querySelector("#timerStartField");
 const timerModeInfo = document.querySelector("#timerModeInfo");
 const variableBar = document.querySelector("#variableBar");
 const variableToggle = document.querySelector("#variableToggle");
@@ -49,7 +50,8 @@ const TEXT_FIELD_PATTERN = /^(?:details\d?|state\d?|largeImageText|smallImageTex
 const TIMER_NOTES = {
   elapsed: "O tempo começa quando a presence é ativada e continua depois de uma reconexão.",
   since: "Conta desde a última vez que o relógio marcou esse horário. Com 09:00, mostra há quanto tempo você começou hoje.",
-  until: "Mostra quanto falta para esse horário. Depois dele, a contagem vai para o mesmo horário do dia seguinte."
+  until: "Mostra quanto falta para esse horário. Depois dele, a contagem vai para o mesmo horário do dia seguinte.",
+  manual: "O cronômetro começa no tempo que você digitar, em horas:minutos:segundos, e segue contando. Com 01:30:00, aparece 1h30 já decorrida ao ativar. Com só dois números, como 05:00, conta como minutos e segundos. Aceita até 99999 horas."
 };
 const TIMER_DEFAULTS = { since: "09:00", until: "18:00" };
 const WEEKDAY_LABELS = ["D", "S", "T", "Q", "Q", "S", "S"];
@@ -593,7 +595,8 @@ function formatClockDuration(ms) {
 
 function renderTimer(config = getConfig()) {
   const now = Date.now();
-  const timestamps = PresenceFormat.timerTimestamps(config, { startMs: timerStartedAt, nowMs: now });
+  const startMs = config.timerMode === "manual" && !connected ? now : timerStartedAt;
+  const timestamps = PresenceFormat.timerTimestamps(config, { startMs, nowMs: now });
   document.querySelector("#previewTimer").textContent = timestamps?.end
     ? `${formatClockDuration(timestamps.end - now)} restante`
     : `${formatClockDuration(now - (timestamps?.start ?? now))} decorrido`;
@@ -651,7 +654,8 @@ function renderPreview() {
   imageRotationFields.hidden = !config.rotateImages;
   timerFields.hidden = !config.showTimer;
   musicPlayerIconLargeRow.hidden = !config.musicPlayerIcon;
-  timerTimeField.hidden = config.timerMode === "elapsed";
+  timerTimeField.hidden = !(config.timerMode in TIMER_DEFAULTS);
+  timerStartField.hidden = config.timerMode !== "manual";
   setInfo(timerModeInfo, TIMER_NOTES[config.timerMode] || TIMER_NOTES.elapsed);
   document.querySelector("#previewMode").textContent = music
     ? (config.musicAsPlaying ? "Jogando" : music.video ? "Assistindo" : "Ouvindo")
