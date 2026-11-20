@@ -1,5 +1,5 @@
 const { presenceText } = require("./media");
-const { resolveText, statusDisplayType, timerTimestamps } = require("./renderer/presence-format");
+const { parseDuration, resolveText, statusDisplayType, timerTimestamps } = require("./renderer/presence-format");
 
 const MAX_UNIX_TIMESTAMP_MS = 2147483647000;
 const ACTIVITY_TYPES = Object.freeze({ playing: 0, listening: 2, watching: 3, competing: 5 });
@@ -103,6 +103,12 @@ function validateImages(config) {
   }
 }
 
+function validateTimer(config) {
+  if (config.showTimer && config.timerMode === "manual" && parseDuration(config.timerStart) === undefined) {
+    throw new Error("Cronômetro: informe o tempo inicial como horas:minutos:segundos, por exemplo 01:30:00.");
+  }
+}
+
 function rotationIntervalMs(config, field = "rotationInterval") {
   const seconds = Number(config[field]);
   return (ROTATION_INTERVALS.includes(seconds) ? seconds : DEFAULT_ROTATION_SECONDS) * 1000;
@@ -132,6 +138,7 @@ function buildActivity(config, options = {}) {
   const textContext = { now, ...context };
   validateButtons(config);
   validateImages(config);
+  validateTimer(config);
 
   const activity = { instance: false };
   const type = ACTIVITY_TYPES[config.activityType] || 0;

@@ -6,7 +6,7 @@
   Rich Presence personalizada no Discord, sem mexer em código.
 
   <p>
-    <img src="https://img.shields.io/badge/versão-1.6.0-5865F2?style=for-the-badge" alt="Versão 1.6.0">
+    <img src="https://img.shields.io/badge/versão-1.7.0-5865F2?style=for-the-badge" alt="Versão 1.7.0">
     <img src="https://img.shields.io/badge/plataforma-Windows-0078D4?style=for-the-badge&logo=windows" alt="Plataforma Windows">
   </p>
 </div>
@@ -17,7 +17,7 @@
 
 ## O que dá para fazer
 
-- Montar a atividade com textos, imagens, até dois botões e cronômetro, vendo o resultado na pré-visualização
+- Montar a atividade com textos, imagens, até dois botões e cronômetro (que pode começar num tempo que você digita), vendo o resultado na pré-visualização
 - Alternar textos e imagens sozinhos, cada um no seu intervalo
 - Escolher o que aparece ao seu lado na lista de membros: o nome do app, os detalhes ou o estado
 - Guardar cinco perfis e trocar entre eles pela janela ou pelo ícone da bandeja

@@ -96,6 +96,14 @@
     return match ? { hours: Number(match[1]), minutes: Number(match[2]) } : undefined;
   }
 
+  function parseDuration(value) {
+    const text = String(value || "").trim();
+    const match = /^(\d{1,5}):([0-5]\d):([0-5]\d)$/.exec(text) || /^()(\d{1,3}):([0-5]\d)$/.exec(text);
+    if (!match) return undefined;
+    const [hours, minutes, seconds] = match.slice(1).map(Number);
+    return ((hours * 60 + minutes) * 60 + seconds) * 1000;
+  }
+
   function clockOn(nowMs, clock, dayOffset = 0) {
     const date = new Date(nowMs);
     date.setDate(date.getDate() + dayOffset);
@@ -117,6 +125,8 @@
       const today = clockOn(nowMs, clock);
       return { end: today > nowMs ? today : clockOn(nowMs, clock, 1) };
     }
+    const offset = config.timerMode === "manual" ? parseDuration(config.timerStart) : undefined;
+    if (offset !== undefined && startMs > offset) return { start: startMs - offset };
     return startMs > 0 ? { start: startMs } : undefined;
   }
 
@@ -170,6 +180,7 @@
     discreetTitle,
     musicButton,
     parseClock,
+    parseDuration,
     playerInfo,
     resolveText,
     statusDisplayType,

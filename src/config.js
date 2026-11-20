@@ -56,6 +56,7 @@ const defaults = {
   showTimer: true,
   timerMode: "elapsed",
   timerTime: "",
+  timerStart: "",
   highPriority: false,
   musicMode: false,
   musicPlayerIcon: true,
@@ -91,7 +92,8 @@ const textLimits = {
   button1Url: 512,
   button2Label: 32,
   button2Url: 512,
-  timerTime: 5
+  timerTime: 5,
+  timerStart: 11
 };
 
 const choiceFields = {
@@ -99,7 +101,7 @@ const choiceFields = {
   statusDisplay: ["name", "details", "state"],
   rotationInterval: ["15", "30", "60", "120", "300"],
   imageRotationInterval: ["15", "30", "60", "120", "300"],
-  timerMode: ["elapsed", "since", "until"],
+  timerMode: ["elapsed", "since", "until", "manual"],
   musicButton: ["off", "auto", "youtube", "spotify", "deezer", "apple"]
 };
 

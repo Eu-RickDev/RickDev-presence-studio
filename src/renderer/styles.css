@@ -558,6 +558,8 @@ select option { color: var(--text); background: var(--card); }
   padding: 16px 20px 20px;
 }
 
+.timer-fields input:invalid { border-color: var(--negative); }
+
 .tab-content > * + * { margin-top: 16px; }
 .tab-content > .section-title { margin-top: 28px; }
 .tab-content > .section-title + * { margin-top: 0; }
